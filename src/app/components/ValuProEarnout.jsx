@@ -408,25 +408,25 @@ const runSensitivity = (baseConfig, paramKey, range, steps = 12) => {
 };
 
 // ============================================================
-// DOCUMENT EXTRACTION (Claude API)
+// DOCUMENT EXTRACTION (Claude API) — with provenance capture
 // ============================================================
 const extractFromDocument = async (text, mode) => {
   const systemPrompts = {
     backtest: `You are a financial data extraction specialist. Extract earnout/contingent consideration from SEC filings.
 Return ONLY valid JSON, no markdown:
-{"earnouts":[{"name":"string","acquisitionDate":"string or null","maxPayout":number or null,"initialFairValue":number or null,"currentFairValue":number or null,"priorFairValue":number or null,"fairValueChange":number or null,"metric":"string or null","structure":"linear|binary|tiered|milestone|percentage|cagr|unknown","threshold":number or null,"participationRate":number or null,"cap":number or null,"floor":number or null,"fixedPayment":number or null,"measurementPeriods":[{"year":number,"target":number or null,"label":"string"}],"hasCatchUp":boolean,"hasClawback":boolean,"hasAcceleration":boolean,"accelerationTrigger":"string or null","hasCumulativeTarget":boolean,"cumulativeTarget":number or null,"multiYearCap":number or null,"methodology":"Monte Carlo|probability-weighted|DCF|unknown","discountRate":number or null,"volatility":number or null,"riskFreeRate":number or null,"projectedMetric":number or null,"level3Rollforward":{"openingBalance":number or null,"additions":number or null,"fairValueChanges":number or null,"payments":number or null,"closingBalance":number or null},"confidenceScore":number}],"reportingPeriod":"string","companyName":"string","filingType":"10-K|10-Q"}
-Extract EVERY earnout. Use null for undisclosed values.`,
+{"earnouts":[{"name":"string","acquisitionDate":"string or null","maxPayout":number or null,"initialFairValue":number or null,"currentFairValue":number or null,"priorFairValue":number or null,"fairValueChange":number or null,"metric":"string or null","structure":"linear|binary|tiered|milestone|percentage|cagr|unknown","threshold":number or null,"participationRate":number or null,"cap":number or null,"floor":number or null,"fixedPayment":number or null,"measurementPeriods":[{"year":number,"target":number or null,"label":"string"}],"hasCatchUp":boolean,"hasClawback":boolean,"hasAcceleration":boolean,"accelerationTrigger":"string or null","hasCumulativeTarget":boolean,"cumulativeTarget":number or null,"multiYearCap":number or null,"methodology":"Monte Carlo|probability-weighted|DCF|unknown","discountRate":number or null,"volatility":number or null,"riskFreeRate":number or null,"projectedMetric":number or null,"level3Rollforward":{"openingBalance":number or null,"additions":number or null,"fairValueChanges":number or null,"payments":number or null,"closingBalance":number or null},"confidenceScore":number,"provenance":{"volatilitySource":"string or null","discountRateSource":"string or null","projectionSource":"string or null","methodologyQuote":"string or null","level3DisclosureText":"string or null","comparableCompanies":["string"] or null,"referencedDocuments":["string"] or null}}],"reportingPeriod":"string","companyName":"string","filingType":"10-K|10-Q"}
+Extract EVERY earnout. Use null for undisclosed. For provenance: extract any text describing HOW assumptions were derived (e.g. "volatility based on comparable company analysis"), any comparable company names mentioned, any external documents referenced (e.g. "per the Merger Agreement Section 2.4"), and any direct quotes about methodology.`,
 
-    live_ppa: `You are a valuation report extraction specialist. Extract earnout terms from a PPA valuation report.
+    live_ppa: `You are a valuation report extraction specialist. Extract earnout terms AND their provenance from a PPA valuation report.
 Return ONLY valid JSON, no markdown:
-{"earnout":{"name":"string","metric":"string","metricDefinition":"string","structure":"linear|binary|tiered|milestone|percentage|cagr|multi-metric","periods":[{"year":number,"yearFromNow":number,"threshold":number or null,"cap":number or null,"floor":number or null,"fixedPayment":number or null,"participationRate":number or null,"projectedMetric":number or null,"tiers":[{"lower":number,"upper":number,"rate":number}] or null}],"hasCatchUp":boolean,"catchUpDescription":"string or null","hasClawback":boolean,"clawbackThreshold":number or null,"clawbackRate":number or null,"clawbackCap":number or null,"hasAcceleration":boolean,"accelerationTrigger":"string or null","accelerationTreatment":"string or null","hasCumulativeTarget":boolean,"cumulativeTarget":number or null,"hasMultiYearCap":boolean,"multiYearCap":number or null,"hasCarryForward":boolean,"isMultiMetric":boolean,"secondMetric":{"name":"string","threshold":number,"currentValue":number,"growthRate":number,"volatility":number} or null,"metricCorrelation":number or null,"paymentTiming":"string","paymentDelay":number or null,"isEscrowed":boolean,"methodology":"Monte Carlo|probability-weighted|DCF","assumptions":{"currentMetric":number,"metricGrowthRate":number or null,"volatility":number,"discountRate":number,"riskFreeRate":number,"creditAdjustment":number or null,"comparableCompanies":["string"] or null},"initialFairValue":number or null,"currency":"string","confidenceScore":number,"ambiguities":["string"],"alternativeInterpretations":[{"clause":"string","interpretation1":"string","interpretation2":"string"}] or null}}`
+{"earnout":{"name":"string","metric":"string","metricDefinition":"string","structure":"linear|binary|tiered|milestone|percentage|cagr|multi-metric","periods":[{"year":number,"yearFromNow":number,"threshold":number or null,"cap":number or null,"floor":number or null,"fixedPayment":number or null,"participationRate":number or null,"projectedMetric":number or null,"tiers":[{"lower":number,"upper":number,"rate":number}] or null}],"hasCatchUp":boolean,"catchUpDescription":"string or null","hasClawback":boolean,"clawbackThreshold":number or null,"clawbackRate":number or null,"clawbackCap":number or null,"hasAcceleration":boolean,"accelerationTrigger":"string or null","accelerationTreatment":"string or null","hasCumulativeTarget":boolean,"cumulativeTarget":number or null,"hasMultiYearCap":boolean,"multiYearCap":number or null,"hasCarryForward":boolean,"isMultiMetric":boolean,"secondMetric":{"name":"string","threshold":number,"currentValue":number,"growthRate":number,"volatility":number} or null,"metricCorrelation":number or null,"paymentTiming":"string","paymentDelay":number or null,"isEscrowed":boolean,"methodology":"Monte Carlo|probability-weighted|DCF","assumptions":{"currentMetric":number,"metricGrowthRate":number or null,"volatility":number,"discountRate":number,"riskFreeRate":number,"creditAdjustment":number or null,"comparableCompanies":["string"] or null},"initialFairValue":number or null,"currency":"string","confidenceScore":number,"ambiguities":["string"],"alternativeInterpretations":[{"clause":"string","interpretation1":"string","interpretation2":"string"}] or null,"provenance":{"volatility":{"value":number or null,"methodology":"string or null","comparableCompanies":[{"name":"string","ticker":"string or null","volatility":number or null}] or null,"deLeveringMethod":"string or null","dataDateRange":"string or null","sourceLocation":"string or null"},"discountRate":{"value":number or null,"methodology":"string or null","components":{"riskFreeRate":number or null,"equityRiskPremium":number or null,"sizePremium":number or null,"companySpecificRisk":number or null,"beta":number or null,"costOfDebt":number or null,"debtWeight":number or null,"equityWeight":number or null} or null,"sourceLocation":"string or null"},"projections":{"source":"string or null","forecastDate":"string or null","provider":"string or null","sourceLocation":"string or null"},"creditRisk":{"methodology":"string or null","acquirerRating":"string or null","sourceLocation":"string or null"},"referencedDocuments":["string"] or null,"methodologyQuote":"string or null"}}}`
   };
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-      body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 4096, system: systemPrompts[mode], messages: [{ role: "user", content: `Extract all earnout information:\n\n${text.substring(0, 80000)}` }] })
+      body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 6000, system: systemPrompts[mode], messages: [{ role: "user", content: `Extract all earnout information AND provenance details:\n\n${text.substring(0, 80000)}` }] })
     });
     const data = await response.json();
     const txt = data.content?.map(c => c.text || "").join("") || "";
@@ -452,7 +452,7 @@ const verifyExtraction = async (text, extracted) => {
 // EXCEL GENERATION — Professionally formatted with xlsx-js-style
 // ============================================================
 const generateExcel = async (params, results, sensitivities) => {
-  const XLSX = await import("xlsx-js-style");
+  let XLSX; try { XLSX = await import("xlsx-js-style"); } catch(e) { XLSX = await import("xlsx"); }
   const wb = XLSX.utils.book_new();
   const periods = params.periods || [];
   const nP = periods.length;
@@ -1009,6 +1009,20 @@ export default function ValuProEarnout() {
   const [sensitivities, setSensitivities] = useState(null);
   const [backtestComparison, setBacktestComparison] = useState(null);
 
+  // Provenance — auto-populated from extraction, user can supplement
+  const [provenance, setProvenance] = useState({
+    volatility: { methodology: null, comparableCompanies: [], deLeveringMethod: null, sourceLocation: null, userNote: "" },
+    discountRate: { methodology: null, components: null, sourceLocation: null, userNote: "" },
+    projections: { source: null, forecastDate: null, provider: null, sourceLocation: null, userNote: "" },
+    creditRisk: { methodology: null, acquirerRating: null, userNote: "" },
+    referencedDocuments: [], methodologyQuote: null,
+  });
+
+  // Audit Support
+  const [auditQuestions, setAuditQuestions] = useState(null);
+  const [auditResponses, setAuditResponses] = useState(null);
+  const [auditProcessing, setAuditProcessing] = useState(false);
+
   const tc = theme === "dark";
   const c = {
     bg: tc ? "#0c1222" : "#f8f9fb", card: tc ? "#151e30" : "#ffffff", cardBorder: tc ? "#1e2d4a" : "#e5e7eb",
@@ -1089,6 +1103,19 @@ export default function ValuProEarnout() {
       };
     }
     setParams(np);
+    // Populate provenance from extraction if available
+    const prov = extractedData?.earnout?.provenance || extractedData?.earnouts?.[0]?.provenance || {};
+    if (prov && Object.keys(prov).length > 0) {
+      setProvenance(prev => ({
+        ...prev,
+        volatility: { ...prev.volatility, ...(prov.volatility || {}), comparableCompanies: prov.volatility?.comparableCompanies || prov.comparableCompanies || extractedData?.earnout?.assumptions?.comparableCompanies?.map(n => ({ name: n })) || [] },
+        discountRate: { ...prev.discountRate, ...(prov.discountRate || {}) },
+        projections: { ...prev.projections, ...(prov.projections || {}) },
+        creditRisk: { ...prev.creditRisk, ...(prov.creditRisk || {}) },
+        referencedDocuments: prov.referencedDocuments || [],
+        methodologyQuote: prov.methodologyQuote || null,
+      }));
+    }
     setProgress(100);
     // Go to review screen instead of running MC directly
     setTimeout(() => setView("review"), 400);
@@ -1139,11 +1166,20 @@ export default function ValuProEarnout() {
       setParams(gtParams);
       setBacktestComparison({ reported: null, computed: null, gap: null, isDemo: true, scenarioBasedValue: 9.1e6 });
       setVerification({ verified: true, overallConfidence: 100, recommendation: "proceed", errors: [], missingTerms: [] });
+      // Set GT provenance for demo
+      setProvenance({
+        volatility: { methodology: "2-year historical equity volatility of comparable public companies, de-levered using Hamada equation and re-levered at subject company capital structure.", comparableCompanies: [{ name: "Comparable A", ticker: "COMPA", volatility: 0.38 }, { name: "Comparable B", ticker: "COMPB", volatility: 0.42 }, { name: "Comparable C", ticker: "COMPC", volatility: 0.40 }], deLeveringMethod: "Hamada equation", sourceLocation: "Grant Thornton article, April 2021" },
+        discountRate: { methodology: "EBITDA discount rate reflecting required return for EBITDA cash flows, consistent with WACC.", components: { riskFreeRate: 0.025, equityRiskPremium: 0.055, sizePremium: 0.02 }, sourceLocation: "GT article assumptions" },
+        projections: { source: "Management forecast at acquisition date", forecastDate: "December 31, 2018", provider: "TargetCo management", sourceLocation: "GT article example terms" },
+        creditRisk: { methodology: "Implied from risk-adjusted discount rate of 4.5% less risk-free rate of 2.5%", acquirerRating: "Not stated — implied investment-grade" },
+        referencedDocuments: ["Grant Thornton 'Earnout values: Scenario-based forecast vs. simulation', April 2021", "Appraisal Foundation VFR 4: Valuation of Contingent Consideration, February 2019"],
+        methodologyQuote: "The authoritative VFR 4 recommends the option-pricing methodologies, including a Monte Carlo simulation, in the valuation of revenue and earnings earnouts.",
+      });
       setView("review");
     }, delay + 300);
   };
 
-  const resetAll = () => { setView("landing"); setResults(null); setSensitivities(null); setExtractedData(null); setDocText(""); setFiles([]); setBacktestComparison(null); setMode(null); };
+  const resetAll = () => { setView("landing"); setResults(null); setSensitivities(null); setExtractedData(null); setDocText(""); setFiles([]); setBacktestComparison(null); setMode(null); setAuditQuestions(null); setAuditResponses(null); setProvenance({ volatility: { methodology: null, comparableCompanies: [], deLeveringMethod: null, sourceLocation: null, userNote: "" }, discountRate: { methodology: null, components: null, sourceLocation: null, userNote: "" }, projections: { source: null, forecastDate: null, provider: null, sourceLocation: null, userNote: "" }, creditRisk: { methodology: null, acquirerRating: null, userNote: "" }, referencedDocuments: [], methodologyQuote: null }); };
 
   // Run valuation after user confirms extracted terms on review screen
   const runFromReview = () => {
@@ -1172,6 +1208,122 @@ export default function ValuProEarnout() {
         setTimeout(() => setView("results"), 300);
       }, 100);
     }, 200);
+  };
+
+  // ============================================================
+  // AUDIT SUPPORT ENGINE
+  // ============================================================
+  const processAuditQuestions = async (questionsText) => {
+    setAuditProcessing(true);
+    const mrp = Math.max(0, params.discountRate - params.riskFreeRate);
+    const pd = params.payoffDiscountRate != null ? params.payoffDiscountRate : params.riskFreeRate + (params.isEscrowed ? 0 : (params.creditAdj || 0));
+    const ctx = {
+      terms: { metric: params.metric, periods: params.periods.length, structure: params.periods[0]?.structure, maxPayout: params.multiYearCap || params.periods.reduce((s, p) => s + (p.cap || p.fixedPayment || 0), 0), hasCatchUp: params.hasCatchUp, hasClawback: params.hasClawback, isEscrowed: params.isEscrowed, paymentDelay: params.paymentDelay },
+      assumptions: { currentMetric: params.currentMetric, growthRate: params.metricGrowthRate, volatility: params.volatility, metricDiscountRate: params.discountRate, riskFreeRate: params.riskFreeRate, creditAdj: params.creditAdj, metricRiskPremium: mrp, payoffDiscountRate: pd, riskNeutralDrift: params.metricGrowthRate - mrp },
+      periodDetail: params.periods.map((p, i) => ({ period: i + 1, year: p.yearFromNow, structure: p.structure, threshold: p.threshold, projectedMetric: p.projectedMetric, fixedPayment: p.fixedPayment, cap: p.cap, fairValue: results?.periodStats?.[i]?.mean })),
+      results: results ? { fairValue: results.fairValue, ci95: results.ci95, probPayoff: results.probPayoff, percentiles: results.percentiles } : null,
+      sensitivity: sensitivities ? Object.fromEntries(Object.entries(sensitivities).map(([k, v]) => [k, { min: Math.min(...v.map(d => d.fairValue)), max: Math.max(...v.map(d => d.fairValue)) }])) : null,
+      provenance,
+    };
+    try {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 8000,
+          system: `You are an expert earnout valuation professional responding to auditor questions about a contingent consideration fair value measurement under ASC 820 / ASC 805 / IFRS 13 / IFRS 3. You have deep knowledge of the Appraisal Foundation VFR 4 guidance.
+
+You will receive the auditor's questions and the complete valuation context.
+
+For EACH question, generate a professional response. Return ONLY valid JSON array, no markdown:
+[{"question":"the original question verbatim","response":"detailed professional response using model data and provenance","confidence":number 0-100,"confidenceReason":"brief explanation of confidence level","missingInfo":"what would strengthen this response, or null","category":"methodology|assumptions|sensitivity|rollforward|terms|compliance|other"}]
+
+CONFIDENCE SCORING:
+90-100: Uses specific numbers from the model AND provenance source detail. Fully defensible.
+70-89: Uses model data but provenance is partial. Structurally sound, may need user to add sources.
+50-69: Directionally correct using general industry knowledge. User should add deal-specific detail.
+Below 50: Outside model scope. Provide a framework and tell user what to supply.
+
+RESPONSE STYLE: Write as if you are the valuation professional defending the work to the auditor. Be specific with numbers. Reference ASC 820, VFR 4, or other guidance where relevant. For assumption questions, cite the provenance data if available. For sensitivity questions, use the sensitivity data from the model.`,
+          messages: [{ role: "user", content: `AUDITOR QUESTIONS:\n${questionsText}\n\nVALUATION CONTEXT:\n${JSON.stringify(ctx, null, 2)}` }] })
+      });
+      const data = await response.json();
+      const txt = (data.content?.map(c => c.text || "").join("") || "").replace(/```json|```/g, "").trim();
+      setAuditResponses(JSON.parse(txt));
+    } catch (err) {
+      console.error("Audit engine error:", err);
+      setAuditResponses([{ question: "Processing Error", response: "The audit response engine encountered an error. Please check your API key and try again.", confidence: 0, confidenceReason: "Error", missingInfo: null, category: "other" }]);
+    }
+    setAuditProcessing(false);
+  };
+
+  // Export audit responses as Word
+  const exportAuditWord = () => {
+    if (!auditResponses) return;
+    const date = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+    const confBadge = (c) => c >= 90 ? "●" : c >= 70 ? "◐" : c >= 50 ? "○" : "△";
+    const html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset="utf-8">
+<style>body{font-family:Aptos,Calibri,sans-serif;font-size:9pt;line-height:1.6;color:#1a1a1a;max-width:8in;margin:0 auto;padding:0.8in}
+h1{font-size:13pt;font-weight:700;color:#1F3864;margin-bottom:4pt}h2{font-size:11pt;font-weight:700;color:#1F3864;margin-top:16pt;border-bottom:1px solid #1F3864;padding-bottom:3pt}
+p{margin-bottom:6pt;text-align:justify}.q{font-weight:700;color:#1F3864;margin-top:12pt;margin-bottom:4pt;font-size:9.5pt}
+.conf{display:inline-block;padding:1pt 6pt;border-radius:3pt;font-size:8pt;font-weight:600;margin-left:6pt}
+.high{background:#E2EFDA;color:#1F6F3A}.med{background:#FFF2CC;color:#8B6914}.low{background:#FCE4E4;color:#C0392B}
+.missing{background:#F2F7FB;border-left:2pt solid #2563eb;padding:4pt 8pt;margin:4pt 0;font-size:8.5pt;color:#2563eb}
+.footer{margin-top:24pt;border-top:1pt solid #999;padding-top:6pt;font-size:7.5pt;color:#666}</style></head><body>
+<h1>Auditor Response — Contingent Consideration Fair Value</h1>
+<p style="font-size:8.5pt;color:#555">${params.metric} Earnout • ${params.periods.length} Periods • ${date}</p>
+<p style="font-size:8.5pt;color:#555">Fair Value: $${(results?.fairValue / 1e6).toFixed(2)}M | 95% CI: $${(results?.ci95[0] / 1e6).toFixed(2)}M – $${(results?.ci95[1] / 1e6).toFixed(2)}M</p>
+<h2>Responses to Auditor Questions</h2>
+${auditResponses.map((r, i) => `
+<p class="q">Q${i + 1}: ${r.question} <span class="conf ${r.confidence >= 90 ? "high" : r.confidence >= 70 ? "med" : "low"}">${confBadge(r.confidence)} ${r.confidence}%</span></p>
+<p>${r.response}</p>
+${r.missingInfo ? `<div class="missing"><strong>To strengthen:</strong> ${r.missingInfo}</div>` : ""}
+`).join("")}
+<div class="footer">Generated by ValuProEarnout Audit Support Engine — ${date}<br>Responses are draft and should be reviewed by a qualified valuation professional before submission.</div>
+</body></html>`;
+    const blob = new Blob([html], { type: "application/msword" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = `AuditResponse_${new Date().toISOString().split("T")[0]}.doc`; a.click();
+  };
+
+  // Export audit responses as Excel
+  const exportAuditExcel = async () => {
+    if (!auditResponses) return;
+    let XLSX; try { XLSX = await import("xlsx-js-style"); } catch(e) { XLSX = await import("xlsx"); }
+    const wb = XLSX.utils.book_new();
+    const fontH = { name: "Aptos", sz: 10, bold: true, color: { rgb: "FFFFFF" } };
+    const fillH = { fgColor: { rgb: "1F3864" } };
+    const fontN = { name: "Aptos", sz: 9 };
+    const fontB = { name: "Aptos", sz: 9, bold: true };
+    const bdr = { top: { style: "thin", color: { rgb: "B4B4B4" } }, bottom: { style: "thin", color: { rgb: "B4B4B4" } }, left: { style: "thin", color: { rgb: "B4B4B4" } }, right: { style: "thin", color: { rgb: "B4B4B4" } } };
+    const sH = { font: fontH, fill: { type: "pattern", patternType: "solid", ...fillH }, alignment: { horizontal: "center", vertical: "center", wrapText: true }, border: bdr };
+    const sN = { font: fontN, alignment: { vertical: "top", wrapText: true }, border: bdr };
+    const sB = { font: fontB, alignment: { vertical: "top", wrapText: true }, border: bdr };
+    const sConf = (c) => ({ font: fontB, alignment: { horizontal: "center", vertical: "center" }, border: bdr, fill: { type: "pattern", patternType: "solid", fgColor: { rgb: c >= 90 ? "E2EFDA" : c >= 70 ? "FFF2CC" : c >= 50 ? "FCE4E4" : "F2F2F2" } }, numFmt: "0" });
+
+    const ws = {};
+    const s = (r, col, v, st) => { ws[XLSX.utils.encode_cell({ r, c: col })] = { v, t: typeof v === "number" ? "n" : "s", s: st }; };
+    s(0, 0, "#", sH); s(0, 1, "Auditor Question", sH); s(0, 2, "Draft Response", sH); s(0, 3, "Confidence", sH); s(0, 4, "Confidence Reason", sH); s(0, 5, "Missing Info / To Strengthen", sH); s(0, 6, "Category", sH);
+    auditResponses.forEach((r, i) => {
+      const row = i + 1;
+      const bg = i % 2 === 0 ? "FFFFFF" : "F8F9FA";
+      const sA = { ...sN, fill: { type: "pattern", patternType: "solid", fgColor: { rgb: bg } } };
+      s(row, 0, i + 1, { ...sB, alignment: { horizontal: "center", vertical: "top" }, fill: { type: "pattern", patternType: "solid", fgColor: { rgb: bg } } });
+      s(row, 1, r.question, { ...sB, fill: { type: "pattern", patternType: "solid", fgColor: { rgb: bg } } });
+      s(row, 2, r.response, sA);
+      s(row, 3, r.confidence, sConf(r.confidence));
+      s(row, 4, r.confidenceReason || "", sA);
+      s(row, 5, r.missingInfo || "—", sA);
+      s(row, 6, r.category || "", sA);
+    });
+    ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: auditResponses.length, c: 6 } });
+    ws["!cols"] = [{ wch: 4 }, { wch: 40 }, { wch: 70 }, { wch: 10 }, { wch: 30 }, { wch: 40 }, { wch: 14 }];
+    // Set row heights for wrapping
+    ws["!rows"] = [{ hpt: 20 }, ...auditResponses.map(() => ({ hpt: 80 }))];
+    XLSX.utils.book_append_sheet(wb, ws, "Audit Responses");
+    const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = `AuditResponse_${new Date().toISOString().split("T")[0]}.xlsx`; a.click();
   };
 
   // ============================================================
@@ -1428,7 +1580,7 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
       return diags[field] || { status: "ok", message: "", suggestion: null, impact: null, resolution: null };
     };
 
-    // ---- ENHANCED EditField with inline diagnostics ----
+    // ---- ENHANCED EditField with inline diagnostics + provenance ----
     const EditField = ({ label, value, onChange, type = "number", step, format, fieldKey, periodIdx, tooltip }) => {
       const [showDiag, setShowDiag] = useState(false);
       const diag = getDiag(fieldKey, value);
@@ -1437,6 +1589,10 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
       const statusIcon = diag.status === "missing" ? "alert" : diag.status === "warning" ? "alert" : diag.status === "info" ? "info" : "check";
       const statusLabel = diag.status === "missing" ? "Not Found" : diag.status === "warning" ? "Review" : diag.status === "info" ? "Note" : "Extracted";
 
+      // Get provenance for this field
+      const fieldProv = fieldKey === "volatility" ? provenance.volatility : fieldKey === "discountRate" ? provenance.discountRate : fieldKey === "metricGrowthRate" || fieldKey === "projectedMetric" ? provenance.projections : fieldKey === "creditAdj" ? provenance.creditRisk : null;
+      const hasProvenance = fieldProv && (fieldProv.methodology || fieldProv.source || (fieldProv.comparableCompanies && fieldProv.comparableCompanies.length > 0) || fieldProv.sourceLocation);
+
       return (
         <div style={{ marginBottom: 12 }}>
           <div className="vf" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
@@ -1444,21 +1600,58 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
               {label}
               {tooltip && <span title={tooltip} style={{ cursor: "help", opacity: 0.4 }}><Icon name="info" size={9} /></span>}
             </span>
-            <button onClick={() => setShowDiag(!showDiag)} style={{ display: "flex", alignItems: "center", gap: 3, padding: "1px 6px", borderRadius: 3, border: "none", cursor: "pointer", fontSize: 9, fontWeight: 500, background: isIssue ? `${statusColor}12` : "transparent", color: statusColor }}>
-              <Icon name={statusIcon} size={9} color={statusColor} /> {statusLabel}
-            </button>
+            <div className="vf" style={{ gap: 4, alignItems: "center" }}>
+              {hasProvenance && <span style={{ fontSize: 8, padding: "1px 4px", borderRadius: 2, background: "rgba(5,150,105,0.06)", color: c.success }}>sourced</span>}
+              <button onClick={() => setShowDiag(!showDiag)} style={{ display: "flex", alignItems: "center", gap: 3, padding: "1px 6px", borderRadius: 3, border: "none", cursor: "pointer", fontSize: 9, fontWeight: 500, background: isIssue ? `${statusColor}12` : "transparent", color: statusColor }}>
+                <Icon name={statusIcon} size={9} color={statusColor} /> {statusLabel}
+              </button>
+            </div>
           </div>
           <input type={type} value={format === "percent" ? ((value || 0) * 100).toFixed(1) : value || ""} step={step}
             onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) onChange(format === "percent" ? v / 100 : v); }}
             style={{ width: "100%", padding: "6px 10px", fontSize: 12, fontFamily: "'IBM Plex Mono',monospace", border: `1.5px solid ${isIssue ? statusColor : c.cardBorder}`, borderRadius: 6, background: isIssue ? `${statusColor}06` : c.inputBg, color: c.text, outline: "none", textAlign: "right" }} />
           
-          {/* Expandable diagnostics panel */}
+          {/* Expandable diagnostics + provenance panel */}
           {showDiag && (
             <div style={{ marginTop: 6, padding: "8px 10px", background: tc ? "#1a2540" : "#fafbfc", border: `1px solid ${c.cardBorder}`, borderRadius: 6, fontSize: 10, lineHeight: 1.55 }}>
               {/* Status message */}
-              <div style={{ color: c.text, marginBottom: diag.suggestion || diag.resolution ? 6 : 0 }}>
+              <div style={{ color: c.text, marginBottom: 6 }}>
                 <Icon name={statusIcon} size={10} color={statusColor} /> {diag.message}
               </div>
+              
+              {/* Provenance — source detail */}
+              {hasProvenance && (
+                <div style={{ padding: "5px 8px", background: "rgba(5,150,105,0.03)", border: `1px solid rgba(5,150,105,0.1)`, borderRadius: 4, marginBottom: 5 }}>
+                  <div style={{ fontSize: 9, fontWeight: 600, color: c.success, marginBottom: 3 }}>Source Detail (used by Audit Support engine)</div>
+                  {fieldProv.methodology && <div style={{ color: c.textMuted }}><strong>Methodology:</strong> {fieldProv.methodology}</div>}
+                  {fieldProv.source && <div style={{ color: c.textMuted }}><strong>Source:</strong> {fieldProv.source}</div>}
+                  {fieldProv.comparableCompanies && fieldProv.comparableCompanies.length > 0 && (
+                    <div style={{ color: c.textMuted }}><strong>Comparables:</strong> {fieldProv.comparableCompanies.map(co => `${co.name}${co.ticker ? ` (${co.ticker})` : ""}${co.volatility ? `: ${(co.volatility * 100).toFixed(1)}%` : ""}`).join(", ")}</div>
+                  )}
+                  {fieldProv.deLeveringMethod && <div style={{ color: c.textMuted }}><strong>De-levering:</strong> {fieldProv.deLeveringMethod}</div>}
+                  {fieldProv.components && <div style={{ color: c.textMuted }}><strong>Components:</strong> {Object.entries(fieldProv.components).filter(([,v]) => v != null).map(([k,v]) => `${k}: ${typeof v === "number" && v < 1 ? (v*100).toFixed(1)+"%" : v}`).join(", ")}</div>}
+                  {fieldProv.forecastDate && <div style={{ color: c.textMuted }}><strong>Forecast date:</strong> {fieldProv.forecastDate}</div>}
+                  {fieldProv.provider && <div style={{ color: c.textMuted }}><strong>Provider:</strong> {fieldProv.provider}</div>}
+                  {fieldProv.acquirerRating && <div style={{ color: c.textMuted }}><strong>Rating:</strong> {fieldProv.acquirerRating}</div>}
+                  {(fieldProv.sourceLocation) && <div style={{ color: c.textDim, fontStyle: "italic" }}>Ref: {fieldProv.sourceLocation}</div>}
+                </div>
+              )}
+
+              {/* No provenance — editable note for user to add */}
+              {!hasProvenance && (
+                <div style={{ padding: "5px 8px", background: "rgba(217,119,6,0.03)", border: `1px solid rgba(217,119,6,0.1)`, borderRadius: 4, marginBottom: 5 }}>
+                  <div style={{ fontSize: 9, fontWeight: 600, color: c.warning, marginBottom: 3 }}>No source detail found — add below to strengthen audit responses</div>
+                  <textarea value={fieldProv?.userNote || ""} placeholder="E.g., Based on 3 comparable companies per Exhibit C of PPA report..."
+                    onChange={e => {
+                      const note = e.target.value;
+                      if (fieldKey === "volatility") setProvenance(p => ({ ...p, volatility: { ...p.volatility, userNote: note } }));
+                      else if (fieldKey === "discountRate") setProvenance(p => ({ ...p, discountRate: { ...p.discountRate, userNote: note } }));
+                      else if (fieldKey === "metricGrowthRate" || fieldKey === "projectedMetric") setProvenance(p => ({ ...p, projections: { ...p.projections, userNote: note } }));
+                      else if (fieldKey === "creditAdj") setProvenance(p => ({ ...p, creditRisk: { ...p.creditRisk, userNote: note } }));
+                    }}
+                    rows={2} style={{ width: "100%", padding: "4px 6px", fontSize: 10, border: `1px solid ${c.cardBorder}`, borderRadius: 4, background: c.inputBg, color: c.text, outline: "none", resize: "vertical", fontFamily: "'Inter',system-ui,sans-serif" }} />
+                </div>
+              )}
               
               {/* Suggestion */}
               {diag.suggestion && (
@@ -1656,6 +1849,7 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
             <button onClick={() => generateExcel(params, results, sensitivities)} style={{ padding: "7px 14px", background: "transparent", border: `1px solid ${c.cardBorder}`, borderRadius: 6, color: c.text, cursor: "pointer", fontSize: 11, display: "flex", alignItems: "center", gap: 5 }}><Icon name="download" size={13} />Excel</button>
             <button onClick={() => generateMemo(params, results, sensitivities, "pdf")} style={{ padding: "7px 14px", background: "transparent", border: `1px solid ${c.cardBorder}`, borderRadius: 6, color: c.text, cursor: "pointer", fontSize: 11, display: "flex", alignItems: "center", gap: 5 }}><Icon name="file" size={13} />PDF</button>
             <button onClick={() => generateMemo(params, results, sensitivities, "docx")} style={{ padding: "7px 14px", background: "transparent", border: `1px solid ${c.cardBorder}`, borderRadius: 6, color: c.text, cursor: "pointer", fontSize: 11, display: "flex", alignItems: "center", gap: 5 }}><Icon name="file" size={13} />Word</button>
+            <button onClick={() => setView("audit")} style={{ padding: "7px 14px", background: c.accentLight, border: `1px solid ${c.accent}33`, borderRadius: 6, color: c.accent, cursor: "pointer", fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}><Icon name="shield" size={13} color={c.accent} />Audit Support</button>
             <button onClick={resetAll} style={{ padding: "7px 14px", background: "transparent", border: `1px solid ${c.cardBorder}`, borderRadius: 6, color: c.text, cursor: "pointer", fontSize: 11, display: "flex", alignItems: "center", gap: 5 }}><Icon name="plus" size={13} />New</button>
           </div>
         </div>
@@ -1821,6 +2015,144 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
       </div>
     </div>
   );
+
+  // ---- AUDIT SUPPORT ----
+  if (view === "audit") {
+    const handleAuditUpload = async (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      const ext = file.name.split(".").pop().toLowerCase();
+      if (ext === "docx" || ext === "doc") {
+        try {
+          const mammoth = await import("mammoth");
+          const arrayBuffer = await file.arrayBuffer();
+          const result = await mammoth.extractRawText({ arrayBuffer });
+          setAuditQuestions(result.value);
+        } catch (err) {
+          // Fallback: read as text (works for .doc sometimes)
+          const reader = new FileReader();
+          reader.onload = (ev) => setAuditQuestions(ev.target.result);
+          reader.readAsText(file);
+        }
+      } else {
+        const reader = new FileReader();
+        reader.onload = (ev) => setAuditQuestions(ev.target.result);
+        reader.readAsText(file);
+      }
+    };
+    const confColor = (c_) => c_ >= 90 ? "#1F6F3A" : c_ >= 70 ? "#8B6914" : c_ >= 50 ? "#C0392B" : "#666";
+    const confBg = (c_) => c_ >= 90 ? "rgba(5,150,105,0.06)" : c_ >= 70 ? "rgba(217,119,6,0.06)" : c_ >= 50 ? "rgba(220,38,38,0.06)" : "rgba(0,0,0,0.03)";
+    const confLabel = (c_) => c_ >= 90 ? "High — ready to send" : c_ >= 70 ? "Medium — review recommended" : c_ >= 50 ? "Low — needs user input" : "Outside scope";
+
+    return (
+      <div style={{ minHeight: "100vh", background: c.bg, fontFamily: "'Inter',system-ui,sans-serif", color: c.text }}>{fontLink}{hdr(true)}
+        <div className="r-p" style={{ maxWidth: 900, margin: "0 auto", padding: "28px" }}>
+          <div className="vf r-col" style={{ justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, gap: 8 }}>
+            <div>
+              <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 3, fontFamily: "'Source Serif 4',Georgia,serif" }}>Audit Support</h2>
+              <p style={{ fontSize: 12, color: c.textMuted }}>Upload the auditor's questions. The engine drafts responses using your model data, assumptions, and provenance.</p>
+            </div>
+            <div className="vf" style={{ gap: 6 }}>
+              <button onClick={() => setView("results")} style={{ padding: "6px 14px", background: "transparent", border: `1px solid ${c.cardBorder}`, borderRadius: 6, color: c.text, cursor: "pointer", fontSize: 11 }}>Back to Results</button>
+              {auditResponses && <>
+                <button onClick={exportAuditWord} style={{ padding: "6px 14px", background: "transparent", border: `1px solid ${c.cardBorder}`, borderRadius: 6, color: c.text, cursor: "pointer", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}><Icon name="download" size={12} />Export Word</button>
+                <button onClick={exportAuditExcel} style={{ padding: "6px 14px", background: "transparent", border: `1px solid ${c.cardBorder}`, borderRadius: 6, color: c.text, cursor: "pointer", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}><Icon name="download" size={12} />Export Excel</button>
+              </>}
+            </div>
+          </div>
+
+          {/* Model context summary */}
+          <div style={{ ...cardStyle, marginBottom: 14, padding: 14, background: tc ? "rgba(37,99,235,0.03)" : "rgba(37,99,235,0.02)", borderColor: tc ? "rgba(37,99,235,0.1)" : "rgba(37,99,235,0.08)" }}>
+            <div style={{ fontSize: 11, color: c.accent, fontWeight: 600, marginBottom: 4 }}>Model Context Available to Audit Engine</div>
+            <div className="vf r-wrap" style={{ gap: 12, fontSize: 10, color: c.textMuted }}>
+              <span>Fair Value: <strong style={{ color: c.text }}>{fmt(results?.fairValue)}</strong></span>
+              <span>Metric: <strong style={{ color: c.text }}>{params.metric}</strong></span>
+              <span>Periods: <strong style={{ color: c.text }}>{params.periods.length}</strong></span>
+              <span>Volatility: <strong style={{ color: c.text }}>{fmtPct(params.volatility)}</strong></span>
+              <span>Provenance: <strong style={{ color: provenance.volatility.comparableCompanies?.length > 0 ? c.success : c.warning }}>{provenance.volatility.comparableCompanies?.length > 0 ? "Available" : "Limited"}</strong></span>
+            </div>
+          </div>
+
+          {/* Upload area */}
+          {!auditResponses && (
+            <div style={{ ...cardStyle, marginBottom: 14 }}>
+              <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, display: "flex", alignItems: "center", gap: 5 }}><Icon name="upload" size={14} color={c.accent} /> Upload Auditor Questions</h3>
+              <label style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 80, cursor: "pointer", borderStyle: "dashed", borderWidth: 2, borderColor: c.cardBorder, borderRadius: 8, padding: 16, marginBottom: 12 }}>
+                <input type="file" accept=".txt,.doc,.docx,.pdf,.csv" onChange={handleAuditUpload} style={{ display: "none" }} />
+                <Icon name="upload" size={20} color={c.accent} />
+                <span style={{ fontSize: 11, color: c.textMuted, marginTop: 6 }}>Upload auditor's question list (.txt, .doc, .docx)</span>
+              </label>
+              <div style={{ fontSize: 11, color: c.textMuted, marginBottom: 10 }}>Or paste questions directly:</div>
+              <textarea value={auditQuestions || ""} onChange={e => setAuditQuestions(e.target.value)} placeholder={"1. Please describe the valuation methodology used.\n2. What comparable companies were used for volatility?\n3. How sensitive is the conclusion to changes in key assumptions?\n4. Is the methodology consistent with the prior period?\n..."} rows={8}
+                style={{ width: "100%", padding: "10px", fontSize: 12, border: `1px solid ${c.cardBorder}`, borderRadius: 6, background: c.inputBg, color: c.text, outline: "none", resize: "vertical", fontFamily: "'Inter',system-ui,sans-serif", lineHeight: 1.6 }} />
+              <button onClick={() => processAuditQuestions(auditQuestions)} disabled={!auditQuestions || auditProcessing}
+                style={{ marginTop: 10, width: "100%", padding: "11px", background: auditQuestions ? "linear-gradient(135deg,#2563eb,#1d4ed8)" : c.cardBorder, border: "none", borderRadius: 7, color: "white", cursor: auditQuestions ? "pointer" : "not-allowed", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                {auditProcessing ? <><div style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid white", borderTopColor: "transparent", animation: "spin 1s linear infinite" }} /> Generating responses...</> : <><Icon name="brain" size={14} color="white" /> Generate Audit Responses</>}
+              </button>
+            </div>
+          )}
+
+          {/* Responses */}
+          {auditResponses && (
+            <div>
+              {/* Summary bar */}
+              <div className="vf r-wrap" style={{ gap: 8, marginBottom: 14 }}>
+                {[{ l: "Total", n: auditResponses.length, bg: c.cardBorder },
+                  { l: "High Confidence", n: auditResponses.filter(r => r.confidence >= 90).length, bg: "rgba(5,150,105,0.1)" },
+                  { l: "Medium", n: auditResponses.filter(r => r.confidence >= 70 && r.confidence < 90).length, bg: "rgba(217,119,6,0.1)" },
+                  { l: "Needs Input", n: auditResponses.filter(r => r.confidence < 70).length, bg: "rgba(220,38,38,0.1)" },
+                ].map((s, i) => (
+                  <div key={i} style={{ padding: "6px 12px", borderRadius: 6, background: s.bg, fontSize: 10, fontWeight: 600 }}>
+                    <span style={{ color: c.textMuted }}>{s.l}: </span><span style={{ color: c.text }}>{s.n}</span>
+                  </div>
+                ))}
+                <button onClick={() => { setAuditResponses(null); setAuditQuestions(null); }} style={{ marginLeft: "auto", padding: "5px 10px", fontSize: 10, background: "transparent", border: `1px solid ${c.cardBorder}`, borderRadius: 4, color: c.textMuted, cursor: "pointer" }}>Upload New Questions</button>
+              </div>
+
+              {/* Individual responses */}
+              {auditResponses.map((r, i) => (
+                <div key={i} style={{ ...cardStyle, marginBottom: 10, padding: 16 }}>
+                  {/* Question header */}
+                  <div className="vf" style={{ justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                    <div style={{ flex: 1, fontSize: 12, fontWeight: 600, color: c.text, lineHeight: 1.5 }}>
+                      <span style={{ color: c.accent, marginRight: 6 }}>Q{i + 1}</span>{r.question}
+                    </div>
+                    <div style={{ flexShrink: 0, marginLeft: 10, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+                      <div style={{ padding: "2px 8px", borderRadius: 4, background: confBg(r.confidence), color: confColor(r.confidence), fontSize: 10, fontWeight: 700 }}>{r.confidence}%</div>
+                      <span style={{ fontSize: 9, color: confColor(r.confidence) }}>{confLabel(r.confidence)}</span>
+                    </div>
+                  </div>
+
+                  {/* Category tag */}
+                  <div style={{ marginBottom: 8 }}>
+                    <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: c.accentLight, color: c.accent, fontWeight: 500, textTransform: "capitalize" }}>{r.category}</span>
+                  </div>
+
+                  {/* Response */}
+                  <div style={{ fontSize: 11, color: c.text, lineHeight: 1.7, whiteSpace: "pre-wrap", padding: "10px 12px", background: tc ? "#1a2540" : "#fafbfc", borderRadius: 6, border: `1px solid ${c.cardBorder}` }}>
+                    {r.response}
+                  </div>
+
+                  {/* Missing info callout */}
+                  {r.missingInfo && (
+                    <div style={{ marginTop: 8, padding: "6px 10px", borderLeft: `3px solid ${c.accent}`, background: "rgba(37,99,235,0.03)", borderRadius: "0 4px 4px 0", fontSize: 10, color: c.accent, lineHeight: 1.5 }}>
+                      <strong>To strengthen this response:</strong> {r.missingInfo}
+                    </div>
+                  )}
+
+                  {/* Confidence reason */}
+                  {r.confidenceReason && (
+                    <div style={{ marginTop: 4, fontSize: 9, color: c.textDim, fontStyle: "italic" }}>
+                      Confidence: {r.confidenceReason}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return <div style={{ minHeight: "100vh", background: c.bg }}>{fontLink}{hdr()}</div>;
 }
