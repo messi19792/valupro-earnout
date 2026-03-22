@@ -727,6 +727,73 @@ export default function ValuProEarnout() {
     setProgress(100); setTimeout(() => setView("results"), 400);
   };
 
+  // ---- GRANT THORNTON DEMO ----
+  const runGTDemo = () => {
+    setMode("backtest");
+    setView("processing"); setProgress(0);
+    const gtParams = {
+      metric: "Adjusted EBITDA",
+      currentMetric: 12e6, // FY18 base EBITDA
+      metricGrowthRate: 0.10,
+      volatility: 0.40, // GT stated: 40% EBITDA volatility
+      discountRate: 0.10, // GT stated: 10% EBITDA discount rate
+      riskFreeRate: 0.025, // ~2018 UST rate
+      creditAdj: 0.0, // Not separately stated by GT
+      isEscrowed: false,
+      periods: [
+        { year: 1, yearFromNow: 1, structure: "binary", threshold: 14e6, participationRate: 0, fixedPayment: 5e6, cap: 5e6, floor: 0, projectedMetric: 14e6, tiers: null },
+        { year: 2, yearFromNow: 2, structure: "binary", threshold: 15.5e6, participationRate: 0, fixedPayment: 5e6, cap: 5e6, floor: 0, projectedMetric: 15.5e6, tiers: null },
+        { year: 3, yearFromNow: 3, structure: "binary", threshold: 17e6, participationRate: 0, fixedPayment: 5e6, cap: 5e6, floor: 0, projectedMetric: 17e6, tiers: null },
+      ],
+      hasCatchUp: false, hasCumulativeTarget: false, cumulativeTarget: 0,
+      hasMultiYearCap: true, multiYearCap: 15e6, hasCarryForward: false,
+      hasClawback: false, clawbackThreshold: 0, clawbackRate: 0, clawbackCap: 0,
+      hasAcceleration: false, accelerationProb: 0, accelerationTreatment: "max", accelerationPercentile: 75,
+      isMultiMetric: false, secondMetric: null, metricCorrelation: 0.5,
+      paymentDelay: 90,
+    };
+
+    // Simulate the processing stages quickly (no API call needed)
+    const stages = [
+      { s: "Loading Grant Thornton example...", p: 15, d: 300 },
+      { s: "Terms pre-loaded: 3-year binary earnout, $5M/year", p: 35, d: 400 },
+      { s: "Assumptions: 40% vol, 10% discount (per GT)", p: 55, d: 350 },
+      { s: `Running Monte Carlo (${MC_PATHS.toLocaleString()} paths)...`, p: 80, d: 500 },
+      { s: "Generating sensitivity analysis...", p: 95, d: 400 },
+    ];
+
+    let delay = 0;
+    stages.forEach(({ s, p, d }) => {
+      delay += d;
+      setTimeout(() => { setStage(s); setProgress(p); }, delay);
+    });
+
+    setTimeout(() => {
+      setParams(gtParams);
+      const res = runMultiPeriodMC(gtParams);
+      setResults(res);
+
+      // GT expected range: ~$8M–$12M
+      setBacktestComparison({
+        reported: 10e6, // GT midpoint estimate
+        computed: res.fairValue,
+        gap: Math.abs(res.fairValue - 10e6) / 10e6 * 100,
+        isDemo: true,
+      });
+
+      // Run sensitivities
+      const sens = {};
+      sens["Volatility"] = runSensitivity(gtParams, "volatility", [0.15, 0.70]);
+      sens["Discount Rate"] = runSensitivity(gtParams, "discountRate", [0.06, 0.20]);
+      sens["Current Metric"] = runSensitivity(gtParams, "currentMetric", [gtParams.currentMetric * 0.5, gtParams.currentMetric * 1.5]);
+      sens["Growth Rate"] = runSensitivity(gtParams, "metricGrowthRate", [0, 0.20]);
+      setSensitivities(sens);
+
+      setProgress(100);
+      setTimeout(() => setView("results"), 300);
+    }, delay + 500);
+  };
+
   const resetAll = () => { setView("landing"); setResults(null); setSensitivities(null); setExtractedData(null); setDocText(""); setFiles([]); setBacktestComparison(null); setMode(null); };
 
   // ============================================================
@@ -815,7 +882,41 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
           {files.length > 0 && files.map((f, i) => (<div key={i} className="vf" style={{ alignItems: "center", gap: 8, padding: "7px 12px", background: c.accentLight, borderRadius: 6, marginBottom: 5 }}>
             <Icon name="file" size={13} color={c.accent} /><span style={{ fontSize: 11, flex: 1, color: c.text }}>{f.name}</span><Icon name="check" size={13} color={c.success} />
           </div>))}
-          <div className="vf r-col" style={{ gap: 10, marginTop: 24 }}>
+
+          {/* GT Demo — backtest only */}
+          {isBT && (
+            <div style={{ marginTop: 20, marginBottom: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                <div style={{ flex: 1, height: 1, background: c.cardBorder }} />
+                <span style={{ fontSize: 10, color: c.textDim, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>or try a demo</span>
+                <div style={{ flex: 1, height: 1, background: c.cardBorder }} />
+              </div>
+              <div onClick={runGTDemo}
+                style={{ ...cardStyle, cursor: "pointer", padding: 18, transition: "all 0.2s", borderColor: "rgba(5,150,105,0.15)", background: tc ? "rgba(5,150,105,0.03)" : "rgba(5,150,105,0.02)" }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = c.success; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(5,150,105,0.15)"; e.currentTarget.style.transform = "none"; }}>
+                <div className="vf" style={{ alignItems: "center", gap: 12 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 8, background: "rgba(5,150,105,0.08)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <Icon name="target" size={17} color={c.success} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: c.text, marginBottom: 2 }}>Run Grant Thornton Example</div>
+                    <div style={{ fontSize: 11, color: c.textMuted, lineHeight: 1.5 }}>
+                      3-year binary earnout • $5M/year if EBITDA target met • $15M max
+                    </div>
+                    <div className="vf" style={{ gap: 4, marginTop: 6, flexWrap: "wrap" }}>
+                      {["40% Volatility", "10% Discount Rate", "No API Key Needed", "Instant Results"].map(t => (
+                        <span key={t} style={{ padding: "2px 6px", borderRadius: 3, background: "rgba(5,150,105,0.06)", fontSize: 9, color: c.success, fontWeight: 500 }}>{t}</span>
+                      ))}
+                    </div>
+                  </div>
+                  <Icon name="chevronRight" size={16} color={c.success} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="vf r-col" style={{ gap: 10, marginTop: isBT ? 0 : 24 }}>
             <button onClick={() => { setView("landing"); setMode(null); setFiles([]); setDocText(""); }} style={{ padding: "10px 20px", background: "transparent", border: `1px solid ${c.cardBorder}`, borderRadius: 8, color: c.text, cursor: "pointer", fontSize: 12 }}>Back</button>
             <button onClick={runPipeline} disabled={!docText} style={{ flex: 1, padding: "10px 20px", background: docText ? "linear-gradient(135deg,#2563eb,#1d4ed8)" : c.cardBorder, border: "none", borderRadius: 8, color: "white", cursor: docText ? "pointer" : "not-allowed", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
               <Icon name="brain" size={15} color="white" />{isBT ? "Run Backtest" : "Run Valuation"}
@@ -872,10 +973,14 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
           <div style={{ ...cardStyle, marginBottom: 14, padding: 16, background: backtestComparison.gap < 5 ? "rgba(5,150,105,0.04)" : backtestComparison.gap < 10 ? "rgba(217,119,6,0.04)" : "rgba(220,38,38,0.04)", borderColor: backtestComparison.gap < 5 ? "rgba(5,150,105,0.15)" : backtestComparison.gap < 10 ? "rgba(217,119,6,0.15)" : "rgba(220,38,38,0.15)" }}>
             <div className="vf r-col" style={{ alignItems: "center", gap: 14 }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: backtestComparison.gap < 5 ? c.success : c.warning, marginBottom: 3 }}>
-                  Backtest: {backtestComparison.gap.toFixed(1)}% gap
+                <div style={{ fontSize: 12, fontWeight: 600, color: backtestComparison.gap < 5 ? c.success : backtestComparison.gap < 10 ? c.warning : c.danger, marginBottom: 3 }}>
+                  {backtestComparison.isDemo ? "Grant Thornton Benchmark" : "Backtest"}: {backtestComparison.gap.toFixed(1)}% gap
                 </div>
-                <div style={{ fontSize: 11, color: c.textMuted }}>Reported {fmt(backtestComparison.reported)} — ValuPro {fmt(backtestComparison.computed)}</div>
+                <div style={{ fontSize: 11, color: c.textMuted }}>
+                  {backtestComparison.isDemo
+                    ? `GT expected range $8M–$12M (midpoint $10M) — ValuPro ${fmt(backtestComparison.computed)} • 3-year binary, 40% vol, 10% discount`
+                    : `Reported ${fmt(backtestComparison.reported)} — ValuPro ${fmt(backtestComparison.computed)}`}
+                </div>
               </div>
             </div>
           </div>
