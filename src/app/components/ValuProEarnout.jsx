@@ -449,48 +449,194 @@ const verifyExtraction = async (text, extracted) => {
 };
 
 // ============================================================
-// EXCEL GENERATION
+// EXCEL GENERATION — Formula-linked workbook
 // ============================================================
 const generateExcel = async (params, results, sensitivities) => {
   const XLSX = await import("xlsx");
   const wb = XLSX.utils.book_new();
-  const sum = [["ValuProEarnout — Valuation Summary"], ["Date", new Date().toISOString().split("T")[0]], [],
-    ["EARNOUT TERMS"], ["Metric", params.metric || "EBITDA"], ["Structure", params.periods?.[0]?.structure || "linear"],
-    ["Number of Periods", params.periods?.length || 1], ["Multi-Year Cap", params.multiYearCap || "None"],
-    ["Catch-Up", params.hasCatchUp ? "Yes" : "No"], ["Clawback", params.hasClawback ? "Yes" : "No"],
-    ["Acceleration", params.hasAcceleration ? "Yes" : "No"], [],
-    ["PER-PERIOD DETAIL"]];
-  (params.periods || []).forEach((p, i) => {
-    sum.push([`Period ${i + 1}`, `Year ${p.yearFromNow || i + 1}`]);
-    sum.push(["  Structure", p.structure]); sum.push(["  Threshold", p.threshold]);
-    sum.push(["  Participation Rate", p.participationRate]); sum.push(["  Cap", p.cap || "None"]);
-    sum.push(["  Projected Metric", p.projectedMetric]); sum.push([]);
+  const periods = params.periods || [];
+  const nP = periods.length;
+  const metricRiskPremium = Math.max(0, params.discountRate - params.riskFreeRate);
+  const payoffDisc = params.payoffDiscountRate != null ? params.payoffDiscountRate : params.riskFreeRate + (params.isEscrowed ? 0 : (params.creditAdj || 0));
+
+  // ---- SHEET 1: INPUTS ----
+  // All assumptions in named cells so other sheets reference them
+  const inp = [];
+  inp.push(["ValuProEarnout — Model Inputs"], []);
+  inp.push(["EARNOUT TERMS"]); // Row 3
+  inp.push(["Performance Metric", params.metric || "EBITDA"]); // B4
+  inp.push(["Number of Periods", nP]); // B5
+  inp.push(["Multi-Year Cap ($)", params.multiYearCap || "None"]); // B6
+  inp.push(["Catch-Up", params.hasCatchUp ? "Yes" : "No"]); // B7
+  inp.push(["Clawback", params.hasClawback ? "Yes" : "No"]); // B8
+  inp.push(["Acceleration", params.hasAcceleration ? "Yes" : "No"]); // B9
+  inp.push(["Escrowed", params.isEscrowed ? "Yes" : "No"]); // B10
+  inp.push([]);
+  inp.push(["ASSUMPTIONS"]); // Row 12
+  inp.push(["Current Metric ($)", params.currentMetric]); // B13
+  inp.push(["Metric Growth Rate", params.metricGrowthRate]); // B14
+  inp.push(["Volatility (σ)", params.volatility]); // B15
+  inp.push(["Metric Discount Rate", params.discountRate]); // B16
+  inp.push(["Risk-Free Rate", params.riskFreeRate]); // B17
+  inp.push(["Credit Risk Adjustment", params.creditAdj || 0]); // B18
+  inp.push(["Payment Delay (days)", params.paymentDelay || 120]); // B19
+  inp.push([]);
+  inp.push(["DERIVED (formula-linked)"]); // Row 21
+  inp.push(["Metric Risk Premium", null]); // B22 — formula
+  inp.push(["Payoff Discount Rate", null]); // B23 — formula
+  inp.push(["Risk-Neutral Drift", null]); // B24 — formula
+  inp.push([]);
+  // Per-period inputs
+  inp.push(["PER-PERIOD TERMS"]); // Row 26
+  inp.push(["Period", "Year", "Structure", "Threshold ($)", "Participation Rate", "Fixed Payment ($)", "Cap ($)", "Projected Metric ($)"]); // Row 27
+  periods.forEach((p, i) => {
+    inp.push([i + 1, p.yearFromNow || i + 1, p.structure, p.threshold || 0, p.participationRate || 0, p.fixedPayment || 0, p.cap || 0, p.projectedMetric || 0]);
   });
-  sum.push([], ["ASSUMPTIONS"], ["Current Metric", params.currentMetric], ["Growth Rate", params.metricGrowthRate],
-    ["Volatility", params.volatility], ["Discount Rate", params.discountRate], ["Risk-Free Rate", params.riskFreeRate],
-    ["Credit Adj", params.creditAdj || 0], [], ["RESULTS"], ["Fair Value", results.fairValue],
-    ["95% CI Low", results.ci95[0]], ["95% CI High", results.ci95[1]], ["Std Error", results.stdError],
-    ["Prob of Payoff", `${results.probPayoff}%`], [],
-    ["PERCENTILES"], ...Object.entries(results.percentiles).map(([k, v]) => [k.replace("p", "") + "th", v]));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sum), "Summary");
 
-  if (sensitivities) {
-    const sd = [["Sensitivity Analysis"], []];
-    for (const [label, data] of Object.entries(sensitivities)) {
-      sd.push([label], ["Input", "Fair Value"]); data.forEach(d => sd.push([d.value, d.fairValue])); sd.push([]);
-    }
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sd), "Sensitivity");
-  }
+  const ws1 = XLSX.utils.aoa_to_sheet(inp);
+  // Add formulas for derived fields
+  // Row 22 (0-indexed row 21): Metric Risk Premium = B16 - B17
+  ws1["B22"] = { t: "n", f: "B16-B17" };
+  // Row 23: Payoff Discount Rate = B17 + B18 (or explicit if escrowed)
+  ws1["B23"] = { t: "n", f: params.isEscrowed ? "B17" : "B17+B18" };
+  // Row 24: Risk-Neutral Drift = B14 - B22
+  ws1["B24"] = { t: "n", f: "B14-B22" };
 
+  // Format percentages
+  const pctFmt = "0.0%";
+  ["B14","B15","B16","B17","B18","B22","B23","B24"].forEach(c => { if (ws1[c]) ws1[c].z = pctFmt; });
+  const dolFmt = "#,##0";
+  ["B13","B6"].forEach(c => { if (ws1[c] && typeof ws1[c].v === "number") ws1[c].z = dolFmt; });
+
+  // Column widths
+  ws1["!cols"] = [{ wch: 24 }, { wch: 18 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 18 }];
+  XLSX.utils.book_append_sheet(wb, ws1, "Inputs");
+
+  // ---- SHEET 2: VALUATION — formula-linked to Inputs ----
+  const val = [];
+  val.push(["ValuProEarnout — Valuation Output"], []);
+  val.push(["FAIR VALUE SUMMARY"]); // Row 3
+  val.push(["Fair Value (Mean, $)", results.fairValue]); // B4
+  val.push(["Standard Error ($)", results.stdError]); // B5
+  val.push(["95% CI — Low ($)", null]); // B6 — formula
+  val.push(["95% CI — High ($)", null]); // B7 — formula
+  val.push(["Probability of Any Payoff", results.probPayoff / 100]); // B8
+  val.push(["Monte Carlo Paths", MC_PATHS]); // B9
+  val.push([]);
+  val.push(["PERCENTILE DISTRIBUTION"]); // Row 11
+  val.push(["Percentile", "Fair Value ($)"]); // Row 12
+  const pctKeys = Object.keys(results.percentiles);
+  pctKeys.forEach((k, i) => {
+    val.push([k.replace("p", "") + "th", results.percentiles[k]]); // Row 13+
+  });
+  val.push([]);
+  val.push(["PER-PERIOD FAIR VALUE DECOMPOSITION"]); // dynamic row
+  val.push(["Period", "Mean FV ($)", "P25 ($)", "Median ($)", "P75 ($)", "% of Total FV"]);
+  const periodStartRow = val.length; // 0-indexed
   if (results.periodStats) {
-    const pd = [["Per-Period Analysis"], ["Period", "Mean FV", "P25", "P50", "P75"]];
-    results.periodStats.forEach((ps, i) => pd.push([`Period ${i + 1}`, ps.mean, ps.p25, ps.p50, ps.p75]));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pd), "Period Detail");
+    results.periodStats.forEach((ps, i) => {
+      val.push([`Period ${i + 1}`, ps.mean, ps.p25, ps.p50, ps.p75, null]); // F column = formula
+    });
+    val.push(["Total", null, null, null, null, null]); // Sum row
   }
 
-  const dist = [["Distribution"], ["Bin", "Count"]];
-  results.histogram.forEach(h => dist.push([h.x, h.count]));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dist), "Distribution");
+  const ws2 = XLSX.utils.aoa_to_sheet(val);
+  // CI formulas: B6 = B4 - 1.96 * B5, B7 = B4 + 1.96 * B5
+  ws2["B6"] = { t: "n", f: "B4-1.96*B5" };
+  ws2["B7"] = { t: "n", f: "B4+1.96*B5" };
+  ws2["B8"] = { t: "n", v: results.probPayoff / 100, z: "0.0%" };
+
+  // Per-period % of total and sum formulas
+  if (results.periodStats) {
+    results.periodStats.forEach((ps, i) => {
+      const row = periodStartRow + i + 1; // 1-indexed for Excel
+      ws2[`F${row}`] = { t: "n", f: `B${row}/B4` };
+      ws2[`F${row}`].z = "0.0%";
+    });
+    const sumRow = periodStartRow + nP + 1;
+    ws2[`B${sumRow}`] = { t: "n", f: `SUM(B${periodStartRow + 1}:B${periodStartRow + nP})` };
+    ws2[`F${sumRow}`] = { t: "n", f: `B${sumRow}/B4` };
+    ws2[`F${sumRow}`].z = "0.0%";
+  }
+
+  // Dollar formatting
+  ["B4","B5","B6","B7"].forEach(c => { if (ws2[c]) ws2[c].z = "#,##0"; });
+  ws2["!cols"] = [{ wch: 22 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, ws2, "Valuation");
+
+  // ---- SHEET 3: RISK-NEUTRAL BRIDGE (shows step-by-step computation) ----
+  const brg = [];
+  brg.push(["ValuProEarnout — Risk-Neutral Bridge"], []);
+  brg.push(["This sheet traces the fair value computation for each period step-by-step."], []);
+  brg.push(["Step", "Description", "Formula", ...periods.map((_, i) => `Period ${i + 1}`)]);
+  brg.push(["1", "Management Projected Metric ($)", "From PPA / forecast", ...periods.map(p => p.projectedMetric || 0)]);
+  brg.push(["2", "Metric Risk Premium", "=Inputs!B16 - Inputs!B17", ...periods.map(() => metricRiskPremium)]);
+  brg.push(["3", "Time to Payment (years)", "Year + delay/365", ...periods.map(p => (p.yearFromNow || 1) + (params.paymentDelay || 120) / 365)]);
+  brg.push(["4", "Risk-Neutral Discount Factor", "exp(-RiskPremium × T)", ...periods.map(p => Math.exp(-metricRiskPremium * (p.yearFromNow || 1)))]);
+  brg.push(["5", "Risk-Neutral Expected Metric ($)", "Projected × RN Factor", ...periods.map(p => (p.projectedMetric || 0) * Math.exp(-metricRiskPremium * (p.yearFromNow || 1)))]);
+  brg.push(["6", "Threshold ($)", "Earnout target", ...periods.map(p => p.threshold || 0)]);
+  brg.push(["7", "Moneyness (RN Metric / Threshold)", "Step 5 / Step 6", ...periods.map(p => {
+    const rnm = (p.projectedMetric || 0) * Math.exp(-metricRiskPremium * (p.yearFromNow || 1));
+    return p.threshold ? (rnm / p.threshold) : 0;
+  })]);
+  brg.push(["8", "Volatility (σ)", "From comparable companies", ...periods.map(() => params.volatility)]);
+  brg.push(["9", "σ × √T", "Uncertainty range", ...periods.map(p => params.volatility * Math.sqrt(p.yearFromNow || 1))]);
+  brg.push(["10", "Max Payoff ($)", "Fixed payment or cap", ...periods.map(p => p.fixedPayment || p.cap || 0)]);
+  if (results.periodStats) {
+    brg.push(["11", "Monte Carlo Fair Value ($)", `Mean of ${MC_PATHS.toLocaleString()} simulations`, ...results.periodStats.map(ps => ps.mean)]);
+    brg.push(["12", "Implied Probability of Payoff", "MC FV / (MaxPayoff × disc factor)", ...results.periodStats.map((ps, i) => {
+      const maxP = periods[i].fixedPayment || periods[i].cap || 1;
+      const disc = Math.exp(-payoffDisc * ((periods[i].yearFromNow || 1) + (params.paymentDelay || 120) / 365));
+      return maxP > 0 ? ps.mean / (maxP * disc) : 0;
+    })]);
+  }
+  brg.push([]);
+  brg.push(["", "Total Fair Value ($)", "", results.fairValue]);
+  brg.push(["", "Payoff Discount Rate", "Rf + Credit", payoffDisc]);
+
+  const ws3 = XLSX.utils.aoa_to_sheet(brg);
+  ws3["!cols"] = [{ wch: 6 }, { wch: 36 }, { wch: 28 }, ...periods.map(() => ({ wch: 16 }))];
+  XLSX.utils.book_append_sheet(wb, ws3, "RN Bridge");
+
+  // ---- SHEET 4: SENSITIVITY ----
+  if (sensitivities) {
+    const sd = [["ValuProEarnout — Sensitivity Analysis"], [],
+      ["Each column varies one input while holding all others constant at base case values."], [],
+    ];
+    const sensEntries = Object.entries(sensitivities);
+    // Headers
+    const hdrRow = [""];
+    sensEntries.forEach(([label]) => { hdrRow.push(label + " (Input)"); hdrRow.push(label + " (FV $)"); });
+    sd.push(hdrRow);
+    // Data rows
+    const maxLen = Math.max(...sensEntries.map(([, d]) => d.length));
+    for (let r = 0; r < maxLen; r++) {
+      const row = [r + 1];
+      sensEntries.forEach(([, data]) => {
+        row.push(data[r]?.value ?? "");
+        row.push(data[r]?.fairValue ?? "");
+      });
+      sd.push(row);
+    }
+    sd.push([]);
+    sd.push(["Base Case Fair Value", results.fairValue]);
+
+    const ws4 = XLSX.utils.aoa_to_sheet(sd);
+    ws4["!cols"] = [{ wch: 6 }, ...sensEntries.flatMap(() => [{ wch: 18 }, { wch: 18 }])];
+    XLSX.utils.book_append_sheet(wb, ws4, "Sensitivity");
+  }
+
+  // ---- SHEET 5: DISTRIBUTION ----
+  const dist = [["ValuProEarnout — Distribution Data"], [],
+    ["Bin Center ($)", "Frequency", "Cumulative %"]];
+  let cumul = 0;
+  results.histogram.forEach(h => {
+    cumul += h.count;
+    dist.push([h.x, h.count, cumul / MC_PATHS]);
+  });
+  const ws5 = XLSX.utils.aoa_to_sheet(dist);
+  ws5["!cols"] = [{ wch: 18 }, { wch: 12 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, ws5, "Distribution");
 
   const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
   const blob = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
@@ -499,72 +645,140 @@ const generateExcel = async (params, results, sensitivities) => {
 };
 
 // ============================================================
-// MEMO GENERATION
+// MEMO GENERATION — Professional narrative
 // ============================================================
 const generateMemo = (params, results, sensitivities, format = "pdf") => {
   const date = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
   const periods = params.periods || [];
+  const nP = periods.length;
+  const metricRiskPremium = Math.max(0, params.discountRate - params.riskFreeRate);
+  const payoffDisc = params.payoffDiscountRate != null ? params.payoffDiscountRate : params.riskFreeRate + (params.isEscrowed ? 0 : (params.creditAdj || 0));
+  const rnDrift = params.metricGrowthRate - metricRiskPremium;
   const features = [
     params.hasCatchUp && "catch-up provisions", params.hasClawback && "clawback provisions",
     params.hasAcceleration && "acceleration clauses", params.hasCumulativeTarget && "cumulative target",
-    params.hasMultiYearCap && "multi-year cap", params.hasCarryForward && "carry-forward",
-    params.isMultiMetric && "multi-metric conditions", params.isEscrowed && "escrowed funds",
+    params.hasMultiYearCap && `aggregate cap of $${(params.multiYearCap / 1e6).toFixed(1)}M`, params.hasCarryForward && "carry-forward of excess performance",
+    params.isMultiMetric && "multi-metric conditions", params.isEscrowed && "escrowed payment funds",
   ].filter(Boolean);
 
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>ValuProEarnout Memo</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Georgia,serif;font-size:11pt;line-height:1.6;color:#1a1a1a;max-width:8.5in;margin:0 auto;padding:1in}
-h1{font-size:16pt;font-weight:700;margin-bottom:4pt}h2{font-size:13pt;font-weight:700;margin-top:18pt;margin-bottom:6pt;border-bottom:1px solid #ccc;padding-bottom:4pt}
-p{margin-bottom:8pt;text-align:justify}table{width:100%;border-collapse:collapse;margin:10pt 0;font-size:10pt}th,td{border:1px solid #ccc;padding:4pt 8pt;text-align:left}
-th{background:#f5f5f5;font-weight:700}td.n{text-align:right;font-family:Courier,monospace}.hdr{display:flex;justify-content:space-between;margin-bottom:20pt;padding-bottom:10pt;border-bottom:2px solid #1a1a1a}
-.ftr{margin-top:30pt;padding-top:10pt;border-top:1px solid #ccc;font-size:9pt;color:#666}@media print{body{padding:0.5in}}</style></head><body>
-<div class="hdr"><div><h1>Earnout Fair Value Measurement</h1><p style="font-size:10pt;color:#666">Methodology Memorandum — ${date}</p></div><div style="text-align:right"><strong>ValuProEarnout</strong><br><span style="font-size:9pt;color:#666">Automated Remeasurement Platform</span></div></div>
+  // Build narrative per-period analysis
+  const periodNarrative = periods.map((p, i) => {
+    const ps = results.periodStats?.[i];
+    const impliedProb = ps && (p.fixedPayment || p.cap) ? (ps.mean / ((p.fixedPayment || p.cap) * Math.exp(-payoffDisc * ((p.yearFromNow || 1) + (params.paymentDelay || 120) / 365)))) * 100 : 0;
+    const rnExpected = (p.projectedMetric || 0) * Math.exp(-metricRiskPremium * (p.yearFromNow || 1));
+    const moneyness = p.threshold ? rnExpected / p.threshold : 0;
+    const moneynessDesc = moneyness >= 1.1 ? "in-the-money" : moneyness >= 0.95 ? "near-the-money" : "out-of-the-money";
+    return `<p><strong>Period ${i + 1} (Year ${p.yearFromNow || i + 1}):</strong> The earnout requires ${params.metric} to ${p.structure === "binary" ? `meet or exceed the $${(p.threshold / 1e6).toFixed(1)}M threshold, triggering a fixed payment of $${((p.fixedPayment || p.cap) / 1e6).toFixed(1)}M` : p.structure === "linear" ? `exceed $${(p.threshold / 1e6).toFixed(1)}M, with a ${((p.participationRate || 0) * 100).toFixed(0)}% participation rate on the excess${p.cap ? `, capped at $${(p.cap / 1e6).toFixed(1)}M` : ""}` : p.structure === "tiered" ? `achieve tiered performance levels` : `achieve the specified target`}. Management projects ${params.metric} of $${((p.projectedMetric || 0) / 1e6).toFixed(1)}M for this period. After applying the metric risk premium of ${(metricRiskPremium * 100).toFixed(1)}%, the risk-neutral expected metric is $${(rnExpected / 1e6).toFixed(1)}M, placing this period ${moneynessDesc} relative to the threshold (ratio: ${moneyness.toFixed(2)}x). The Monte Carlo simulation yields a period fair value of $${ps ? (ps.mean / 1e6).toFixed(2) : "0.00"}M, implying a risk-neutral probability of payment of approximately ${impliedProb.toFixed(0)}%. The median (P50) outcome is $${ps ? (ps.p50 / 1e6).toFixed(2) : "0.00"}M, reflecting the ${p.structure === "binary" ? "binary nature of the payoff — the majority of simulation paths result in either zero or the full payment amount" : "distribution of possible outcomes around the threshold"}.</p>`;
+  }).join("\n");
 
-<h2>1. Overview</h2>
-<p>This memorandum documents the fair value measurement of contingent consideration (earnout) in accordance with ASC 820 and ASC 805. The earnout liability is classified as Level 3 within the fair value hierarchy. The earnout spans ${periods.length} measurement period${periods.length > 1 ? "s" : ""}${features.length > 0 ? " and includes " + features.join(", ") : ""}.</p>
+  // Sensitivity narrative
+  const sensNarrative = sensitivities ? Object.entries(sensitivities).map(([label, data]) => {
+    const vals = data.map(d => d.fairValue);
+    const minFV = Math.min(...vals), maxFV = Math.max(...vals);
+    const range = maxFV - minFV;
+    const sensitivity = range / results.fairValue * 100;
+    return `${label} drives a range of $${(minFV / 1e6).toFixed(2)}M to $${(maxFV / 1e6).toFixed(2)}M (${sensitivity.toFixed(0)}% of base value)`;
+  }).join("; ") + "." : "";
 
-<h2>2. Earnout Terms</h2>
+  // Find most sensitive input
+  const mostSensitive = sensitivities ? Object.entries(sensitivities).reduce((best, [label, data]) => {
+    const vals = data.map(d => d.fairValue);
+    const range = Math.max(...vals) - Math.min(...vals);
+    return range > best.range ? { label, range } : best;
+  }, { label: "", range: 0 }).label : "";
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>ValuProEarnout — Fair Value Memorandum</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;font-size:11pt;line-height:1.7;color:#1a1a1a;max-width:8.5in;margin:0 auto;padding:1in}
+h1{font-size:17pt;font-weight:700;margin-bottom:4pt;color:#111}h2{font-size:13pt;font-weight:700;margin-top:22pt;margin-bottom:8pt;border-bottom:1.5px solid #333;padding-bottom:4pt;color:#111}
+h3{font-size:11pt;font-weight:700;margin-top:14pt;margin-bottom:4pt;color:#333}
+p{margin-bottom:10pt;text-align:justify}table{width:100%;border-collapse:collapse;margin:10pt 0;font-size:10pt}th,td{border:1px solid #bbb;padding:5pt 8pt;text-align:left}
+th{background:#f0f0f0;font-weight:700;font-family:'Helvetica Neue',Arial,sans-serif;font-size:9pt;text-transform:uppercase;letter-spacing:0.03em}
+td.n{text-align:right;font-family:'Courier New',monospace;font-size:10pt}td.h{font-weight:700;background:#fafafa}
+.hdr{display:flex;justify-content:space-between;margin-bottom:24pt;padding-bottom:12pt;border-bottom:2pt solid #1a1a1a}
+.ftr{margin-top:36pt;padding-top:12pt;border-top:1pt solid #999;font-size:9pt;color:#666;font-family:'Helvetica Neue',Arial,sans-serif}
+.note{background:#f7f7f7;border-left:3pt solid #2563eb;padding:8pt 12pt;margin:10pt 0;font-size:10pt;line-height:1.6}
+@media print{body{padding:0.5in}}</style></head><body>
+<div class="hdr"><div><h1>Contingent Consideration Fair Value Measurement</h1><p style="font-size:10pt;color:#555;font-family:'Helvetica Neue',Arial,sans-serif">Methodology Memorandum — ${date}</p></div><div style="text-align:right;font-family:'Helvetica Neue',Arial,sans-serif"><strong style="font-size:11pt">ValuProEarnout</strong><br><span style="font-size:9pt;color:#666">Automated Remeasurement Platform</span></div></div>
+
+<h2>1. Executive Summary</h2>
+<p>This memorandum documents the fair value measurement of contingent consideration (earnout) liability in accordance with ASC 820, <em>Fair Value Measurement</em>, and ASC 805, <em>Business Combinations</em>. The earnout is classified as Level 3 within the fair value hierarchy, as significant unobservable inputs are required for its measurement.</p>
+<p>The earnout obligation is based on the acquired entity's ${params.metric} performance across ${nP} annual measurement period${nP > 1 ? "s" : ""}${features.length > 0 ? ", and incorporates " + features.join(", ") : ""}. The total maximum payout is $${(params.multiYearCap ? params.multiYearCap / 1e6 : periods.reduce((s, p) => s + (p.cap || p.fixedPayment || 0), 0) / 1e6).toFixed(1)}M.</p>
+<p>Using a multi-period Monte Carlo simulation with ${MC_PATHS.toLocaleString()} paths under the risk-neutral framework prescribed by the Appraisal Foundation's Valuation Advisory 4 (VFR 4), we estimate the fair value of the earnout liability at <strong>$${(results.fairValue / 1e6).toFixed(2)}M</strong> (95% confidence interval: $${(results.ci95[0] / 1e6).toFixed(2)}M to $${(results.ci95[1] / 1e6).toFixed(2)}M). The probability of any positive payoff is ${results.probPayoff}%.</p>
+
+<h2>2. Description of the Earnout</h2>
+<p>The earnout arrangement requires the acquirer to make contingent payments to the seller based on the achievement of specified ${params.metric} performance targets during each measurement period. The key terms are summarized below:</p>
 <table><tr><th>Parameter</th><th>Value</th></tr>
-<tr><td>Performance Metric</td><td>${params.metric || "EBITDA"}</td></tr>
-<tr><td>Number of Measurement Periods</td><td>${periods.length}</td></tr>
-<tr><td>Multi-Year Cap</td><td class="n">${params.multiYearCap ? "$" + (params.multiYearCap / 1e6).toFixed(1) + "M" : "None"}</td></tr>
-<tr><td>Catch-Up Provisions</td><td>${params.hasCatchUp ? "Yes" : "No"}</td></tr>
-<tr><td>Clawback Provisions</td><td>${params.hasClawback ? "Yes" : "No"}</td></tr>
-<tr><td>Acceleration Clauses</td><td>${params.hasAcceleration ? "Yes" : "No"}</td></tr>
-<tr><td>Escrowed</td><td>${params.isEscrowed ? "Yes" : "No"}</td></tr></table>
-
-<h2>3. Per-Period Structure</h2>
-<table><tr><th>Period</th><th>Structure</th><th>Threshold</th><th>Rate/Payment</th><th>Cap</th><th>Projected Metric</th></tr>
-${periods.map((p, i) => `<tr><td>Year ${p.yearFromNow || i + 1}</td><td style="text-transform:capitalize">${p.structure}</td><td class="n">${p.threshold ? "$" + (p.threshold / 1e6).toFixed(1) + "M" : "—"}</td><td class="n">${p.participationRate ? (p.participationRate * 100).toFixed(0) + "%" : p.fixedPayment ? "$" + (p.fixedPayment / 1e6).toFixed(1) + "M" : "—"}</td><td class="n">${p.cap ? "$" + (p.cap / 1e6).toFixed(1) + "M" : "None"}</td><td class="n">${p.projectedMetric ? "$" + (p.projectedMetric / 1e6).toFixed(1) + "M" : "—"}</td></tr>`).join("")}
+<tr><td>Performance Metric</td><td>${params.metric}</td></tr>
+<tr><td>Measurement Periods</td><td>${nP} annual periods</td></tr>
+<tr><td>Maximum Total Payout</td><td class="n">$${(params.multiYearCap ? params.multiYearCap / 1e6 : periods.reduce((s, p) => s + (p.cap || p.fixedPayment || 0), 0) / 1e6).toFixed(1)}M</td></tr>
+<tr><td>Payment Timing</td><td>${params.paymentDelay || 120} days following each measurement period end</td></tr>
+<tr><td>Escrow</td><td>${params.isEscrowed ? "Funds held in escrow — no counterparty credit risk" : "Not escrowed — subject to acquirer credit risk"}</td></tr>
+${features.length > 0 ? `<tr><td>Special Features</td><td>${features.join("; ")}</td></tr>` : ""}
 </table>
 
-<h2>4. Valuation Methodology</h2>
-<p>Fair value was estimated using a multi-period Monte Carlo simulation under the risk-neutral framework. The underlying performance metric was modeled as a stochastic process with annual resolution across ${periods.length} measurement periods using ${MC_PATHS.toLocaleString()} simulation paths. ${params.hasCatchUp ? "Path dependency was modeled explicitly — shortfalls in earlier periods reduce effective thresholds in subsequent periods per the catch-up provisions." : ""} ${params.hasClawback ? "Clawback provisions were evaluated at the end of all measurement periods based on cumulative metric performance." : ""} ${params.isMultiMetric ? "Correlated simulation of two performance metrics was performed to evaluate the joint probability of both metrics exceeding their respective thresholds." : ""}</p>
+<h3>Per-Period Structure</h3>
+<table><tr><th>Period</th><th>Year</th><th>Structure</th><th>Target</th><th>Payment/Rate</th><th>Cap</th><th>Projected Metric</th></tr>
+${periods.map((p, i) => `<tr><td>Period ${i + 1}</td><td>${p.yearFromNow || i + 1}</td><td style="text-transform:capitalize">${p.structure}</td><td class="n">${p.threshold ? "$" + (p.threshold / 1e6).toFixed(1) + "M" : "—"}</td><td class="n">${p.participationRate ? (p.participationRate * 100).toFixed(0) + "%" : p.fixedPayment ? "$" + (p.fixedPayment / 1e6).toFixed(1) + "M" : "—"}</td><td class="n">${p.cap ? "$" + (p.cap / 1e6).toFixed(1) + "M" : "None"}</td><td class="n">${p.projectedMetric ? "$" + (p.projectedMetric / 1e6).toFixed(1) + "M" : "—"}</td></tr>`).join("")}
+</table>
 
-<h2>5. Key Assumptions</h2>
-<table><tr><th>Assumption</th><th>Value</th><th>Source</th></tr>
-<tr><td>Current Metric Value</td><td class="n">$${(params.currentMetric / 1e6).toFixed(1)}M</td><td>Latest actuals / management forecast</td></tr>
-<tr><td>Metric Growth Rate</td><td class="n">${(params.metricGrowthRate * 100).toFixed(1)}%</td><td>Management projection</td></tr>
-<tr><td>Volatility</td><td class="n">${(params.volatility * 100).toFixed(1)}%</td><td>Comparable company equity volatility</td></tr>
-<tr><td>Discount Rate</td><td class="n">${(params.discountRate * 100).toFixed(1)}%</td><td>Risk-adjusted rate</td></tr>
-<tr><td>Risk-Free Rate</td><td class="n">${(params.riskFreeRate * 100).toFixed(1)}%</td><td>U.S. Treasury yield</td></tr>
-<tr><td>Credit Risk Adjustment</td><td class="n">${((params.creditAdj || 0) * 100).toFixed(1)}%</td><td>Counterparty assessment</td></tr></table>
+<h2>3. Valuation Methodology</h2>
 
-<h2>6. Fair Value Conclusion</h2>
+<h3>3.1 Framework Selection</h3>
+<p>The earnout payoff structure is nonlinear — it features ${periods[0]?.structure === "binary" ? "binary thresholds where the payoff is all-or-nothing" : periods[0]?.structure === "tiered" ? "tiered participation levels" : "thresholds that create option-like characteristics"}${params.hasMultiYearCap ? " and a multi-year aggregate cap" : ""}. Consistent with the guidance in the Appraisal Foundation's VFR 4 and industry best practices articulated by firms such as Kroll, Grant Thornton, and Valuation Research Corporation, an Option Pricing Model (OPM) using Monte Carlo simulation is the appropriate methodology for nonlinear, ${nP > 1 ? "multi-period" : "single-period"} earnout structures.</p>
+<p>A scenario-based method (SBM) was considered but rejected, as the SBM is unable to properly account for the risk inherent in the nonlinear payoff structure. The SBM typically overestimates the fair value of earnouts with threshold-based payoffs because it considers too few outcomes and fails to capture the option-like characteristics of the payout.</p>
+
+<h3>3.2 Risk-Neutral Simulation</h3>
+<p>The Monte Carlo simulation was conducted under the risk-neutral framework, which is the standard approach for valuing contingent claims under ASC 820. The key steps are:</p>
+<p><strong>Step 1 — Risk-neutral adjustment:</strong> Management's projected ${params.metric} for each period was adjusted to a risk-neutral basis by discounting at the metric risk premium of ${(metricRiskPremium * 100).toFixed(1)}% (metric discount rate of ${(params.discountRate * 100).toFixed(1)}% less risk-free rate of ${(params.riskFreeRate * 100).toFixed(1)}%). This adjustment, applied before evaluating the payoff structure, removes the market risk premium embedded in management's projections, consistent with VFR 4 guidance that states: "an OPM translates the forecast into a risk-neutral framework by discounting at the required metric risk premium before applying any thresholds, tiers or caps."</p>
+<p><strong>Step 2 — Stochastic simulation:</strong> For each of the ${MC_PATHS.toLocaleString()} simulation paths, the risk-neutral adjusted metric was subjected to log-normal uncertainty calibrated to ${(params.volatility * 100).toFixed(1)}% ${params.metric} volatility, derived from comparable company analysis. The simulated metric value for each period was then evaluated against the applicable threshold to determine the payoff.</p>
+<p><strong>Step 3 — Payoff discounting:</strong> The resulting contingent payments were discounted to present value at ${(payoffDisc * 100).toFixed(1)}% (risk-free rate of ${(params.riskFreeRate * 100).toFixed(1)}%${!params.isEscrowed ? ` plus credit risk adjustment of ${((params.creditAdj || 0) * 100).toFixed(1)}% reflecting acquirer counterparty risk, as funds are not held in escrow` : ", with no credit adjustment as funds are escrowed"}). ${params.paymentDelay ? `A payment delay of ${params.paymentDelay} days following each measurement period end was incorporated into the discounting.` : ""}</p>
+${params.hasCatchUp ? `<p><strong>Path dependency — Catch-up:</strong> The catch-up provision was modeled explicitly. In simulation paths where the metric falls short of the threshold in an earlier period, the shortfall amount is carried forward and effectively reduces the threshold for subsequent periods, increasing the probability of payment in later years. This creates path dependency that cannot be captured by independent period-by-period analysis.</p>` : ""}
+${params.hasClawback ? `<p><strong>Clawback:</strong> At the conclusion of all measurement periods, the cumulative metric performance was evaluated against the clawback threshold. In paths where cumulative performance fell below the threshold, a portion of previously made payments was clawed back at a rate of ${(params.clawbackRate * 100).toFixed(0)}%, subject to the clawback cap.</p>` : ""}
+
+<h2>4. Key Assumptions</h2>
+<table><tr><th>Assumption</th><th>Value</th><th>Basis</th></tr>
+<tr><td>Current ${params.metric}</td><td class="n">$${(params.currentMetric / 1e6).toFixed(1)}M</td><td>Latest actual performance / trailing twelve months</td></tr>
+<tr><td>Metric Growth Rate</td><td class="n">${(params.metricGrowthRate * 100).toFixed(1)}%</td><td>Management projection (real-world expected growth)</td></tr>
+<tr><td>${params.metric} Volatility</td><td class="n">${(params.volatility * 100).toFixed(1)}%</td><td>Equity volatility of comparable public companies, adjusted for financial leverage</td></tr>
+<tr><td>Metric Discount Rate</td><td class="n">${(params.discountRate * 100).toFixed(1)}%</td><td>Required rate of return for ${params.metric} cash flows (WACC-based)</td></tr>
+<tr><td>Risk-Free Rate</td><td class="n">${(params.riskFreeRate * 100).toFixed(1)}%</td><td>U.S. Treasury yield matching weighted-average earnout duration</td></tr>
+<tr><td>Credit Risk Adjustment</td><td class="n">${((params.creditAdj || 0) * 100).toFixed(1)}%</td><td>${params.isEscrowed ? "N/A — funds escrowed" : "Acquirer counterparty credit assessment"}</td></tr>
+<tr><td class="h">Derived: Metric Risk Premium</td><td class="n h">${(metricRiskPremium * 100).toFixed(1)}%</td><td>Metric discount rate less risk-free rate</td></tr>
+<tr><td class="h">Derived: Payoff Discount Rate</td><td class="n h">${(payoffDisc * 100).toFixed(1)}%</td><td>Risk-free rate plus credit risk adjustment</td></tr>
+<tr><td class="h">Derived: Risk-Neutral Drift</td><td class="n h">${(rnDrift * 100).toFixed(1)}%</td><td>Growth rate less metric risk premium</td></tr>
+</table>
+
+<h2>5. Fair Value Conclusion</h2>
 <table><tr><th>Measure</th><th>Value</th></tr>
-<tr><td><strong>Fair Value (Mean)</strong></td><td class="n"><strong>$${(results.fairValue / 1e6).toFixed(2)}M</strong></td></tr>
-<tr><td>95% Confidence Interval</td><td class="n">$${(results.ci95[0] / 1e6).toFixed(2)}M — $${(results.ci95[1] / 1e6).toFixed(2)}M</td></tr>
+<tr><td class="h"><strong>Fair Value (Mean)</strong></td><td class="n h"><strong>$${(results.fairValue / 1e6).toFixed(2)}M</strong></td></tr>
+<tr><td>95% Confidence Interval — Low</td><td class="n">$${(results.ci95[0] / 1e6).toFixed(2)}M</td></tr>
+<tr><td>95% Confidence Interval — High</td><td class="n">$${(results.ci95[1] / 1e6).toFixed(2)}M</td></tr>
 <tr><td>Standard Error</td><td class="n">$${(results.stdError / 1e6).toFixed(3)}M</td></tr>
-<tr><td>Probability of Any Payoff</td><td class="n">${results.probPayoff}%</td></tr></table>
+<tr><td>Probability of Any Payoff</td><td class="n">${results.probPayoff}%</td></tr>
+<tr><td>Maximum Possible Payout</td><td class="n">$${(params.multiYearCap ? params.multiYearCap / 1e6 : periods.reduce((s, p) => s + (p.cap || p.fixedPayment || 0), 0) / 1e6).toFixed(1)}M</td></tr>
+<tr><td>Fair Value as % of Maximum</td><td class="n">${(results.fairValue / (params.multiYearCap || periods.reduce((s, p) => s + (p.cap || p.fixedPayment || 0), 0)) * 100).toFixed(1)}%</td></tr></table>
 
-${results.periodStats ? `<h2>7. Per-Period Fair Value Decomposition</h2>
-<table><tr><th>Period</th><th>Mean FV</th><th>P25</th><th>Median</th><th>P75</th></tr>
-${results.periodStats.map((ps, i) => `<tr><td>Period ${i + 1}</td><td class="n">$${(ps.mean / 1e6).toFixed(2)}M</td><td class="n">$${(ps.p25 / 1e6).toFixed(2)}M</td><td class="n">$${(ps.p50 / 1e6).toFixed(2)}M</td><td class="n">$${(ps.p75 / 1e6).toFixed(2)}M</td></tr>`).join("")}
-</table>` : ""}
+<h2>6. Per-Period Analysis</h2>
+<p>The table below decomposes the total fair value into contributions from each measurement period. This decomposition is useful for understanding which periods drive the most value and for subsequent quarterly remeasurement as periods expire or approach maturity.</p>
+<table><tr><th>Period</th><th>Mean FV</th><th>P25</th><th>Median</th><th>P75</th><th>% of Total</th></tr>
+${results.periodStats ? results.periodStats.map((ps, i) => `<tr><td>Period ${i + 1} (Year ${periods[i]?.yearFromNow || i + 1})</td><td class="n">$${(ps.mean / 1e6).toFixed(2)}M</td><td class="n">$${(ps.p25 / 1e6).toFixed(2)}M</td><td class="n">$${(ps.p50 / 1e6).toFixed(2)}M</td><td class="n">$${(ps.p75 / 1e6).toFixed(2)}M</td><td class="n">${(ps.mean / results.fairValue * 100).toFixed(1)}%</td></tr>`).join("") : ""}
+<tr><td class="h"><strong>Total</strong></td><td class="n h"><strong>$${(results.fairValue / 1e6).toFixed(2)}M</strong></td><td></td><td></td><td></td><td class="n h">100.0%</td></tr></table>
 
-<h2>8. ASC 820 Fair Value Hierarchy</h2>
-<p>The earnout liability is classified as <strong>Level 3</strong>. Significant unobservable inputs include management's projected performance metrics, estimated volatility, and the discount rate. The methodology is consistent with the initial purchase price allocation and prior reporting periods.</p>
+${periodNarrative}
 
-<div class="ftr"><p>Generated by ValuProEarnout — ${date}</p></div></body></html>`;
+<h2>7. Sensitivity Analysis</h2>
+<p>Sensitivity analysis was performed by varying each key assumption independently while holding all other inputs constant at their base case values. The analysis demonstrates the impact of assumption uncertainty on the fair value conclusion:</p>
+<p>${sensNarrative}</p>
+<p>The fair value is most sensitive to changes in <strong>${mostSensitive}</strong>. This is consistent with ${mostSensitive === "Volatility" ? "the option-like nature of the binary payoff structure, where higher volatility increases the probability of extreme outcomes in both directions" : mostSensitive === "Current Metric" || mostSensitive === "Growth Rate" ? "the earnout's dependence on achieving performance thresholds — higher projected performance increases the probability of threshold achievement" : "the economic characteristics of the earnout structure"}.</p>
+
+<h2>8. Fair Value Hierarchy Classification</h2>
+<p>The earnout liability is classified as <strong>Level 3</strong> within the fair value hierarchy defined by ASC 820. Level 3 measurements are based on significant unobservable inputs, which in this case include:</p>
+<p>Management's projected ${params.metric} performance for each measurement period; the estimated ${params.metric} volatility of ${(params.volatility * 100).toFixed(1)}%, derived from comparable company equity volatility adjusted for financial leverage; and the metric discount rate of ${(params.discountRate * 100).toFixed(1)}%, which reflects the required rate of return for ${params.metric}-related cash flows.</p>
+<p>The methodology and assumptions are consistent with the initial purchase price allocation measurement${nP > 1 ? " and, where applicable, with prior period remeasurements" : ""}.</p>
+
+<div class="note"><strong>Methodology note:</strong> This valuation was prepared using ValuProEarnout, an automated remeasurement platform implementing the Option Pricing Model (Monte Carlo simulation) as prescribed by the Appraisal Foundation's Valuation Advisory 4: Valuation of Contingent Consideration (February 2019). The simulation employed ${MC_PATHS.toLocaleString()} paths with annual period resolution under the risk-neutral framework. All computations are deterministic given the input assumptions and random seed.</div>
+
+<div class="ftr"><p>Generated by ValuProEarnout — ${date} | This memorandum is provided for informational purposes and does not constitute an audit opinion or formal appraisal.</p></div></body></html>`;
 
   if (format === "pdf" || format === "both") {
     const win = window.open("", "_blank"); win.document.write(html); win.document.close(); setTimeout(() => win.print(), 500);
