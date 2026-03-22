@@ -12,6 +12,21 @@
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "mathjs": "^12.4.0",
-    "lodash": "^4.17.21"
+    "lodash": "^4.17.21",
+    "xlsx": "^0.18.5"
   }
 }
+```
+
+Click "Commit changes."
+
+**File 2: `src/app/components/ValuProEarnout.jsx`**
+
+Go to that file, click the pencil icon, and use **Ctrl+F** (Find) to search for this line:
+```
+const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
+```
+
+Replace it with:
+```
+const XLSX = await import("xlsx");
