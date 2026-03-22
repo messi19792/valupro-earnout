@@ -108,11 +108,12 @@ const runMultiPeriodMC = (config) => {
   const {
     periods, // Array of period configs [{year, threshold, structure, cap, floor, ...}]
     currentMetric, // Current metric value (starting point for simulation)
-    metricGrowthRate, // Expected annual growth rate
+    metricGrowthRate, // Expected annual growth rate (real-world)
     volatility,
-    discountRate,
+    discountRate, // Metric-specific discount rate (e.g., 10% for EBITDA)
     riskFreeRate,
-    creditAdj = 0,
+    creditAdj = 0, // Credit risk adjustment for counterparty risk
+    payoffDiscountRate = null, // Risk-adjusted rate for discounting payoffs (if null, auto-calculated)
     numPaths = MC_PATHS,
     // Path dependency features
     hasCatchUp = false,
@@ -140,15 +141,25 @@ const runMultiPeriodMC = (config) => {
     isEscrowed = false,
   } = config;
 
-  const effectiveDiscount = discountRate + (isEscrowed ? 0 : creditAdj);
+  // ---- DISCOUNT RATE FRAMEWORK ----
+  // Risk-neutral simulation: drift = metricGrowthRate - (discountRate - riskFreeRate)
+  //   This converts real-world growth to risk-neutral by subtracting the risk premium
+  // Payoff discounting: at riskFreeRate + creditAdj (unless escrowed)
+  //   This is the correct rate for discounting contingent cash flows under risk-neutral
+  // If payoffDiscountRate is explicitly provided, use that instead (for flexibility)
+  const metricRiskPremium = discountRate - riskFreeRate; // e.g., 10% - 2.5% = 7.5%
+  const riskNeutralDrift = metricGrowthRate - metricRiskPremium; // Real growth minus risk premium
+  const effectivePayoffDiscount = payoffDiscountRate != null 
+    ? payoffDiscountRate 
+    : riskFreeRate + (isEscrowed ? 0 : creditAdj);
   const numPeriods = periods.length;
   const allResults = []; // Total discounted payoff per simulation
   const periodResults = Array.from({ length: numPeriods }, () => []); // Per-period payoffs
   const pathData = []; // Store subset for visualization
 
   for (let sim = 0; sim < numPaths; sim++) {
-    // Generate metric path for all periods
-    const metricPath = generateAnnualMetrics(currentMetric, metricGrowthRate, volatility, numPeriods);
+    // Generate metric path for all periods using RISK-NEUTRAL drift
+    const metricPath = generateAnnualMetrics(currentMetric, riskNeutralDrift, volatility, numPeriods);
     
     // Generate second metric if multi-metric
     let secondMetricPath = null;
@@ -197,7 +208,7 @@ const runMultiPeriodMC = (config) => {
           }
         }
         if (hasMultiYearCap) acceleratedPayoff = Math.min(acceleratedPayoff, multiYearCap - cumulativePayments);
-        totalPayoff += acceleratedPayoff * Math.exp(-effectiveDiscount * discountT);
+        totalPayoff += acceleratedPayoff * Math.exp(-effectivePayoffDiscount * discountT);
         periodPayoffs.push(acceleratedPayoff);
         break;
       }
@@ -260,7 +271,7 @@ const runMultiPeriodMC = (config) => {
       }
 
       // Discount and accumulate
-      const discountedPayoff = periodPayoff * Math.exp(-effectiveDiscount * discountT);
+      const discountedPayoff = periodPayoff * Math.exp(-effectivePayoffDiscount * discountT);
       totalPayoff += discountedPayoff;
       cumulativePayments += periodPayoff;
       periodPayoffs.push(periodPayoff);
@@ -273,7 +284,7 @@ const runMultiPeriodMC = (config) => {
         cumulativePayments * clawbackRate,
         clawbackCap > 0 ? clawbackCap : Infinity
       );
-      totalPayoff -= clawback * Math.exp(-effectiveDiscount * (numPeriods));
+      totalPayoff -= clawback * Math.exp(-effectivePayoffDiscount * (numPeriods));
       clawbackAmount = clawback;
     }
 
@@ -619,6 +630,7 @@ export default function ValuProEarnout() {
     discountRate: 0.12,
     riskFreeRate: 0.043,
     creditAdj: 0.01,
+    payoffDiscountRate: null, // null = auto-calculated from riskFreeRate + creditAdj
     isEscrowed: false,
     // Periods
     periods: [
@@ -656,7 +668,7 @@ export default function ValuProEarnout() {
       setResults(r);
       const sens = {};
       sens["Volatility"] = runSensitivity(p, "volatility", [0.15, 0.70]);
-      sens["Discount Rate"] = runSensitivity(p, "discountRate", [0.06, 0.20]);
+      sens["Metric Discount Rate"] = runSensitivity(p, "discountRate", [0.06, 0.20]);
       sens["Current Metric"] = runSensitivity(p, "currentMetric", [p.currentMetric * 0.5, p.currentMetric * 1.5]);
       sens["Growth Rate"] = runSensitivity(p, "metricGrowthRate", [0, 0.20]);
       setSensitivities(sens);
@@ -733,12 +745,13 @@ export default function ValuProEarnout() {
     setView("processing"); setProgress(0);
     const gtParams = {
       metric: "Adjusted EBITDA",
-      currentMetric: 12e6, // FY18 base EBITDA
-      metricGrowthRate: 0.10,
+      currentMetric: 12e6, // FY18 base EBITDA ~$12M
+      metricGrowthRate: 0.12, // Implied by management projections ($12M → $17M over 3 yrs ≈ 12% CAGR)
       volatility: 0.40, // GT stated: 40% EBITDA volatility
-      discountRate: 0.10, // GT stated: 10% EBITDA discount rate
+      discountRate: 0.10, // GT stated: 10% EBITDA discount rate (metric risk premium)
       riskFreeRate: 0.025, // ~2018 UST rate
-      creditAdj: 0.0, // Not separately stated by GT
+      creditAdj: 0.02, // Implied credit spread (risk-adjusted rate 4.5% = riskFree 2.5% + credit 2%)
+      payoffDiscountRate: 0.045, // GT stated: 4.5% risk-adjusted discount rate for payoffs
       isEscrowed: false,
       periods: [
         { year: 1, yearFromNow: 1, structure: "binary", threshold: 14e6, participationRate: 0, fixedPayment: 5e6, cap: 5e6, floor: 0, projectedMetric: 14e6, tiers: null },
@@ -1015,13 +1028,17 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
             {/* Global assumptions */}
             <div style={cardStyle}>
               <h3 style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, display: "flex", alignItems: "center", gap: 5 }}><Icon name="sliders" size={13} color={c.accent} /> Assumptions</h3>
-              <ParamSlider theme={theme} label="Current Metric" value={params.currentMetric} onChange={v => setParams(p => ({ ...p, currentMetric: v }))} min={5e6} max={50e6} step={500000} format="currency" />
-              <ParamSlider theme={theme} label="Growth Rate" value={params.metricGrowthRate} onChange={v => setParams(p => ({ ...p, metricGrowthRate: v }))} min={-0.10} max={0.25} step={0.01} format="percent" />
-              <ParamSlider theme={theme} label="Volatility" value={params.volatility} onChange={v => setParams(p => ({ ...p, volatility: v }))} min={0.10} max={0.75} step={0.01} format="percent" />
-              <ParamSlider theme={theme} label="Discount Rate" value={params.discountRate} onChange={v => setParams(p => ({ ...p, discountRate: v }))} min={0.05} max={0.25} step={0.005} format="percent" />
-              <ParamSlider theme={theme} label="Risk-Free Rate" value={params.riskFreeRate} onChange={v => setParams(p => ({ ...p, riskFreeRate: v }))} min={0.01} max={0.08} step={0.001} format="percent" />
-              <ParamSlider theme={theme} label="Credit Adj." value={params.creditAdj || 0} onChange={v => setParams(p => ({ ...p, creditAdj: v }))} min={0} max={0.05} step={0.005} format="percent" />
-              <button onClick={() => runValuation(params)} style={{ width: "100%", padding: "9px", background: "linear-gradient(135deg,#2563eb,#1d4ed8)", border: "none", borderRadius: 7, color: "white", cursor: "pointer", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, marginTop: 4 }}>
+              <ParamSlider theme={theme} label="Current Metric" value={params.currentMetric} onChange={v => setParams(p => ({ ...p, currentMetric: v }))} min={5e6} max={50e6} step={500000} format="currency" tooltip="Latest actual or projected metric value" />
+              <ParamSlider theme={theme} label="Metric Growth Rate" value={params.metricGrowthRate} onChange={v => setParams(p => ({ ...p, metricGrowthRate: v }))} min={-0.10} max={0.25} step={0.01} format="percent" tooltip="Expected annual growth rate of the metric" />
+              <ParamSlider theme={theme} label="Volatility" value={params.volatility} onChange={v => setParams(p => ({ ...p, volatility: v }))} min={0.10} max={0.75} step={0.01} format="percent" tooltip="Comparable company equity or metric volatility" />
+              <ParamSlider theme={theme} label="Metric Discount Rate" value={params.discountRate} onChange={v => setParams(p => ({ ...p, discountRate: v }))} min={0.05} max={0.25} step={0.005} format="percent" tooltip="Rate to discount the metric itself (e.g., WACC for EBITDA). Determines risk premium in risk-neutral simulation." />
+              <ParamSlider theme={theme} label="Risk-Free Rate" value={params.riskFreeRate} onChange={v => setParams(p => ({ ...p, riskFreeRate: v }))} min={0.01} max={0.08} step={0.001} format="percent" tooltip="US Treasury yield matching earnout duration" />
+              <ParamSlider theme={theme} label="Credit Adj." value={params.creditAdj || 0} onChange={v => setParams(p => ({ ...p, creditAdj: v }))} min={0} max={0.05} step={0.005} format="percent" tooltip="Counterparty credit risk premium (zero if escrowed)" />
+              <div style={{ fontSize: 10, color: c.textDim, padding: "6px 0 2px", borderTop: `1px solid ${c.cardBorder}`, marginTop: 4 }}>
+                Payoff discount: {fmtPct(params.payoffDiscountRate != null ? params.payoffDiscountRate : (params.riskFreeRate + (params.isEscrowed ? 0 : (params.creditAdj || 0))))} (Rf + Credit)
+                <br />Risk-neutral drift: {fmtPct(params.metricGrowthRate - (params.discountRate - params.riskFreeRate))} (Growth − Risk Premium)
+              </div>
+              <button onClick={() => runValuation(params)} style={{ width: "100%", padding: "9px", background: "linear-gradient(135deg,#2563eb,#1d4ed8)", border: "none", borderRadius: 7, color: "white", cursor: "pointer", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, marginTop: 8 }}>
                 <Icon name="refresh" size={13} color="white" /> Recalculate
               </button>
             </div>
