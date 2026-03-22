@@ -797,7 +797,46 @@ export default function ValuProEarnout(){
   // ============================================================
   // RENDER
   // ============================================================
-  const fontLink=<><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Source+Serif+4:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet"/><style>{`*{box-sizing:border-box}body{font-family:'Inter',system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}::selection{background:${c.accent};color:white}`}</style></>;
+  const fontLink=<><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Source+Serif+4:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet"/><style>{`
+*{box-sizing:border-box}
+body{font-family:'Inter',system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;margin:0;padding:0}
+::selection{background:${c.accent};color:white}
+input[type=range]{-webkit-appearance:none;appearance:none;background:${c.cardBorder};border-radius:99px;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:${c.accent};cursor:pointer}
+.vpe-header{padding:12px 36px}
+.vpe-main{padding:100px 36px 60px;max-width:760px}
+.vpe-hero-title{font-size:44px}
+.vpe-cards-grid{grid-template-columns:1fr 1fr}
+.vpe-stats-grid{grid-template-columns:repeat(5,1fr)}
+.vpe-results-layout{grid-template-columns:300px 1fr}
+.vpe-charts-grid{grid-template-columns:1fr 1fr}
+.vpe-percentile-grid{grid-template-columns:repeat(7,1fr)}
+.vpe-upload-area{max-width:640px}
+.vpe-process-area{max-width:560px}
+.vpe-results-area{max-width:1300px;padding:28px 32px}
+.vpe-btn-row{flex-direction:row}
+@media(max-width:768px){
+  .vpe-header{padding:10px 16px}
+  .vpe-main{padding:48px 20px 40px;max-width:100%}
+  .vpe-hero-title{font-size:28px!important;letter-spacing:-0.8px}
+  .vpe-cards-grid{grid-template-columns:1fr!important}
+  .vpe-stats-grid{grid-template-columns:repeat(2,1fr)!important;gap:8px!important}
+  .vpe-results-layout{grid-template-columns:1fr!important}
+  .vpe-charts-grid{grid-template-columns:1fr!important}
+  .vpe-percentile-grid{grid-template-columns:repeat(4,1fr)!important}
+  .vpe-upload-area{max-width:100%;padding:0 16px!important;margin:24px auto!important}
+  .vpe-process-area{max-width:100%;padding:0 20px!important;margin:40px auto!important}
+  .vpe-results-area{padding:16px!important}
+  .vpe-btn-row{flex-direction:column!important}
+  .vpe-stats-row{flex-wrap:wrap;gap:20px!important}
+  .vpe-dl-btns{flex-wrap:wrap}
+}
+@media(max-width:480px){
+  .vpe-hero-title{font-size:24px!important}
+  .vpe-stats-grid{grid-template-columns:1fr 1fr!important}
+  .vpe-percentile-grid{grid-template-columns:repeat(3,1fr)!important}
+}
+`}</style></>;
   
   const themeToggle=(
     <button onClick={()=>setTheme(t=>t==="dark"?"light":"dark")} style={{padding:"6px 12px",background:c.inputBg,border:`1px solid ${c.cardBorder}`,borderRadius:8,color:c.textMuted,cursor:"pointer",display:"flex",alignItems:"center",gap:5,fontSize:12,fontWeight:500,fontFamily:"'Inter',sans-serif",transition:"all 0.15s"}}>
@@ -806,7 +845,7 @@ export default function ValuProEarnout(){
   );
 
   const header=(showBack=false)=>(
-    <header style={{padding:"12px 36px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:`1px solid ${c.cardBorder}`,background:c.headerBg,backdropFilter:"blur(16px)",position:"sticky",top:0,zIndex:100}}>
+    <header className="vpe-header" style={{display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:`1px solid ${c.cardBorder}`,background:c.headerBg,backdropFilter:"blur(16px)",position:"sticky",top:0,zIndex:100}}>
       <div style={{display:"flex",alignItems:"center",gap:14}}>
         {showBack&&<button onClick={()=>{setView("landing");setResults(null);setSensitivities(null);setExtractedData(null);setDocText("");setFiles([]);setBacktestComparison(null);}} style={{background:"none",border:"none",color:c.textMuted,cursor:"pointer",padding:4,transform:"rotate(180deg)"}}><Icon name="chevronRight" size={16}/></button>}
         <div style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer"}} onClick={()=>setView("landing")}>
@@ -826,11 +865,11 @@ export default function ValuProEarnout(){
     return (
       <div style={{minHeight:"100vh",background:c.bg,fontFamily:"'Inter',system-ui,sans-serif",color:c.text}}>
         {fontLink}{header()}
-        <main style={{maxWidth:760,margin:"0 auto",padding:"100px 36px 60px",textAlign:"center"}}>
+        <main className="vpe-main" style={{margin:"0 auto",textAlign:"center"}}>
           <div style={{display:"inline-flex",padding:"5px 14px",borderRadius:6,background:c.accentLight,border:`1px solid ${tc?"rgba(37,99,235,0.2)":"rgba(37,99,235,0.12)"}`,fontSize:11,fontWeight:500,color:c.accent,marginBottom:28,gap:5,alignItems:"center",letterSpacing:"0.02em"}}>
             <Icon name="sparkles" size={12} color={c.accent}/> Quarterly Earnout Remeasurement — Automated
           </div>
-          <h1 style={{fontSize:44,fontWeight:700,lineHeight:1.12,marginBottom:18,letterSpacing:"-1.2px",fontFamily:"'Source Serif 4','Georgia',serif",color:c.text}}>
+          <h1 className="vpe-hero-title" style={{fontWeight:700,lineHeight:1.12,marginBottom:18,letterSpacing:"-1.2px",fontFamily:"'Source Serif 4','Georgia',serif",color:c.text}}>
             Stop overpaying for<br/>
             <span style={{color:c.accent}}>
               a quarterly number refresh
@@ -841,7 +880,7 @@ export default function ValuProEarnout(){
             Get an audit-ready fair value with methodology memo in minutes.
           </p>
           
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,maxWidth:620,margin:"0 auto 56px"}}>
+          <div className="vpe-cards-grid" style={{display:"grid",gap:16,maxWidth:620,margin:"0 auto 56px"}}>
             <div onClick={()=>{setMode("backtest");setView("backtest_upload");}} style={{...cardStyle,cursor:"pointer",padding:30,textAlign:"left",transition:"all 0.2s",borderColor:c.cardBorder}} onMouseEnter={e=>{e.currentTarget.style.borderColor=c.success;e.currentTarget.style.boxShadow=`0 4px 12px rgba(5,150,105,0.08)`;}} onMouseLeave={e=>{e.currentTarget.style.borderColor=c.cardBorder;e.currentTarget.style.boxShadow=c.cardShadow;}}>
               <div style={{width:36,height:36,borderRadius:8,background:tc?"rgba(5,150,105,0.12)":"rgba(5,150,105,0.06)",display:"flex",alignItems:"center",justifyContent:"center",color:c.success,marginBottom:16}}>
                 <Icon name="target" size={18} color={c.success}/>
@@ -871,7 +910,7 @@ export default function ValuProEarnout(){
             </div>
           </div>
           
-          <div style={{display:"flex",gap:40,justifyContent:"center",marginBottom:24}}>
+          <div className="vpe-stats-row" style={{display:"flex",gap:40,justifyContent:"center",marginBottom:24}}>
             {[{n:"50,000",l:"MC Paths"},{n:"< 30 min",l:"Turnaround"},{n:"ASC 820",l:"Compliant"},{n:"Level 3",l:"Audit-Ready"}].map((s,i)=>(
               <div key={i} style={{textAlign:"center"}}>
                 <div style={{fontSize:16,fontWeight:600,color:c.accent,fontFamily:"'IBM Plex Mono',monospace",letterSpacing:"-0.3px"}}>{s.n}</div>
@@ -902,7 +941,7 @@ export default function ValuProEarnout(){
     return (
       <div style={{minHeight:"100vh",background:c.bg,fontFamily:"'Inter',system-ui,sans-serif",color:c.text}}>
         {fontLink}{header(true)}
-        <div style={{maxWidth:640,margin:"48px auto",padding:"0 32px"}}>
+        <div className="vpe-upload-area" style={{margin:"48px auto",padding:"0 32px"}}>
           <h2 style={{fontSize:28,fontWeight:700,marginBottom:6,fontFamily:"'Source Serif 4','Georgia',serif"}}>{isBacktest?"Upload SEC Filing":"Upload Valuation Documents"}</h2>
           <p style={{color:c.textMuted,marginBottom:32,fontSize:14}}>{isBacktest?"Upload 10-K or 10-Q filings to extract earnout disclosures and validate ValuPro's engine against reported fair values.":"Upload the initial PPA valuation report and latest forecast to run your quarterly remeasurement."}</p>
           
@@ -946,7 +985,7 @@ export default function ValuProEarnout(){
     return (
       <div style={{minHeight:"100vh",background:c.bg,fontFamily:"'Inter',system-ui,sans-serif",color:c.text}}>
         {fontLink}{header(false)}
-        <div style={{maxWidth:560,margin:"80px auto",padding:"0 32px",textAlign:"center"}}>
+        <div className="vpe-process-area" style={{margin:"80px auto",textAlign:"center"}}>
           <div style={{width:72,height:72,borderRadius:"50%",background:c.accentLight,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 28px"}}>
             <div style={{animation:"spin 2s linear infinite"}}><Icon name="refresh" size={28} color={c.accent}/></div>
           </div>
@@ -981,14 +1020,14 @@ export default function ValuProEarnout(){
     return (
       <div style={{minHeight:"100vh",background:c.bg,fontFamily:"'Inter',system-ui,sans-serif",color:c.text}}>
         {fontLink}{header(true)}
-        <div style={{padding:"28px 32px",maxWidth:1300,margin:"0 auto"}}>
+        <div className="vpe-results-area" style={{margin:"0 auto"}}>
           {/* Header */}
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24}}>
             <div>
               <h2 style={{fontSize:24,fontWeight:700,marginBottom:4,fontFamily:"'Source Serif 4','Georgia',serif"}}>{mode==="backtest"?"Backtest Results":"Earnout Remeasurement"}</h2>
               <p style={{fontSize:13,color:c.textMuted}}>{params.metric} • {new Date().toLocaleDateString("en-US",{year:"numeric",month:"long",day:"numeric"})}</p>
             </div>
-            <div style={{display:"flex",gap:8}}>
+            <div className="vpe-dl-btns" style={{display:"flex",gap:8}}>
               <button onClick={()=>generateExcel(params,results,sensitivities)} style={{padding:"9px 16px",background:"transparent",border:`1px solid ${c.cardBorder}`,borderRadius:8,color:c.text,cursor:"pointer",fontSize:12,fontFamily:"'Inter',system-ui,sans-serif",display:"flex",alignItems:"center",gap:6}}><Icon name="download" size={14}/>Excel</button>
               <button onClick={()=>generateMemo(params,results,sensitivities,"pdf")} style={{padding:"9px 16px",background:"transparent",border:`1px solid ${c.cardBorder}`,borderRadius:8,color:c.text,cursor:"pointer",fontSize:12,fontFamily:"'Inter',system-ui,sans-serif",display:"flex",alignItems:"center",gap:6}}><Icon name="file" size={14}/>PDF Memo</button>
               <button onClick={()=>generateMemo(params,results,sensitivities,"docx")} style={{padding:"9px 16px",background:"transparent",border:`1px solid ${c.cardBorder}`,borderRadius:8,color:c.text,cursor:"pointer",fontSize:12,fontFamily:"'Inter',system-ui,sans-serif",display:"flex",alignItems:"center",gap:6}}><Icon name="file" size={14}/>Word Memo</button>
@@ -1018,7 +1057,7 @@ export default function ValuProEarnout(){
             </div>
           )}
 
-          <div style={{display:"grid",gridTemplateColumns:"300px 1fr",gap:20}}>
+          <div className="vpe-results-layout" style={{display:"grid",gap:20}}>
             {/* LEFT: Params */}
             <div style={{display:"flex",flexDirection:"column",gap:14}}>
               {/* Extracted terms */}
@@ -1062,7 +1101,7 @@ export default function ValuProEarnout(){
             {/* RIGHT: Results */}
             <div style={{display:"flex",flexDirection:"column",gap:14}}>
               {/* KPIs */}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10}}>
+              <div className="vpe-stats-grid" style={{display:"grid",gap:10}}>
                 {[
                   {label:"Fair Value",value:results.fairValue,icon:"dollar",color:c.accent},
                   {label:"95% CI Low",value:results.ci95[0],icon:"trendUp",color:c.danger},
@@ -1083,7 +1122,7 @@ export default function ValuProEarnout(){
               </div>
 
               {/* Charts */}
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+              <div className="vpe-charts-grid" style={{display:"grid",gap:14}}>
                 <div style={cardStyle}>
                   <h3 style={{fontSize:13,fontWeight:600,marginBottom:14,display:"flex",alignItems:"center",gap:6}}>
                     <Icon name="bar" size={14} color={c.accent}/> Value Distribution
@@ -1110,7 +1149,7 @@ export default function ValuProEarnout(){
                 <h3 style={{fontSize:13,fontWeight:600,marginBottom:14,display:"flex",alignItems:"center",gap:6}}>
                   <Icon name="hash" size={14} color={c.accent}/> Percentile Analysis
                 </h3>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:8}}>
+                <div className="vpe-percentile-grid" style={{display:"grid",gap:8}}>
                   {Object.entries(results.percentiles).map(([key,val])=>{
                     const pct=parseInt(key.replace("p",""));
                     return (
