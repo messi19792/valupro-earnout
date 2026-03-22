@@ -1047,6 +1047,7 @@ export default function ValuProEarnout() {
     setStage("Verifying extraction..."); const verif = await verifyExtraction(docText, extracted); setVerification(verif); setProgress(65);
     setStage("Configuring model..."); setProgress(75);
 
+    let np = { ...params };
     if (mode === "backtest" && extracted?.earnouts?.length > 0) {
       const e = extracted.earnouts[0];
       const numPeriods = e.measurementPeriods?.length || 3;
@@ -1057,19 +1058,15 @@ export default function ValuProEarnout() {
         cap: e.cap || (e.maxPayout ? e.maxPayout / numPeriods : null), floor: e.floor || 0,
         projectedMetric: e.projectedMetric || params.currentMetric * Math.pow(1.08, i + 1), tiers: null,
       }));
-      const np = { ...params, metric: e.metric || params.metric, currentMetric: e.projectedMetric || params.currentMetric,
+      np = { ...params, metric: e.metric || params.metric, currentMetric: e.projectedMetric || params.currentMetric,
         volatility: e.volatility || params.volatility, discountRate: e.discountRate || params.discountRate,
         riskFreeRate: e.riskFreeRate || params.riskFreeRate, periods: newPeriods,
         hasCatchUp: e.hasCatchUp || false, hasClawback: e.hasClawback || false,
         hasAcceleration: e.hasAcceleration || false, hasMultiYearCap: e.multiYearCap ? true : false,
         multiYearCap: e.multiYearCap || e.maxPayout || 15e6,
       };
-      setParams(np); setStage("Running Monte Carlo..."); setProgress(85);
-      await new Promise(r => setTimeout(r, 200));
-      const res = runMultiPeriodMC(np); setResults(res);
       if (e.currentFairValue || e.initialFairValue) {
-        const reported = e.currentFairValue || e.initialFairValue;
-        setBacktestComparison({ reported, computed: res.fairValue, gap: Math.abs(res.fairValue - reported) / reported * 100 });
+        setBacktestComparison({ reported: e.currentFairValue || e.initialFairValue, computed: null, gap: null });
       }
     } else if (mode === "live" && extracted?.earnout) {
       const e = extracted.earnout; const a = e.assumptions || {};
@@ -1079,7 +1076,7 @@ export default function ValuProEarnout() {
         cap: p.cap || null, floor: p.floor || 0, projectedMetric: p.projectedMetric || 0, tiers: p.tiers || null,
       }));
       if (newPeriods.length === 0) newPeriods.push({ ...params.periods[0] });
-      const np = { ...params, metric: e.metric || params.metric, currentMetric: a.currentMetric || params.currentMetric,
+      np = { ...params, metric: e.metric || params.metric, currentMetric: a.currentMetric || params.currentMetric,
         metricGrowthRate: a.metricGrowthRate || params.metricGrowthRate, volatility: a.volatility || params.volatility,
         discountRate: a.discountRate || params.discountRate, riskFreeRate: a.riskFreeRate || params.riskFreeRate,
         creditAdj: a.creditAdjustment || params.creditAdj, periods: newPeriods,
@@ -1090,11 +1087,11 @@ export default function ValuProEarnout() {
         isMultiMetric: e.isMultiMetric || false, secondMetric: e.secondMetric || null,
         isEscrowed: e.isEscrowed || false, paymentDelay: e.paymentDelay || 120,
       };
-      setParams(np); setStage("Running Monte Carlo..."); setProgress(85);
-      await new Promise(r => setTimeout(r, 200)); runValuation(np);
     }
-    setProgress(95); setStage("Generating sensitivity..."); await new Promise(r => setTimeout(r, 300));
-    setProgress(100); setTimeout(() => setView("results"), 400);
+    setParams(np);
+    setProgress(100);
+    // Go to review screen instead of running MC directly
+    setTimeout(() => setView("review"), 400);
   };
 
   // ---- GRANT THORNTON DEMO ----
@@ -1129,8 +1126,7 @@ export default function ValuProEarnout() {
       { s: "Loading Grant Thornton example...", p: 15, d: 300 },
       { s: "Terms pre-loaded: 3-year binary earnout, $5M/year", p: 35, d: 400 },
       { s: "Assumptions: 40% vol, 10% discount (per GT)", p: 55, d: 350 },
-      { s: `Running Monte Carlo (${MC_PATHS.toLocaleString()} paths)...`, p: 80, d: 500 },
-      { s: "Generating sensitivity analysis...", p: 95, d: 400 },
+      { s: "Ready for review...", p: 100, d: 300 },
     ];
 
     let delay = 0;
@@ -1141,35 +1137,42 @@ export default function ValuProEarnout() {
 
     setTimeout(() => {
       setParams(gtParams);
-      const res = runMultiPeriodMC(gtParams);
-      setResults(res);
-
-      // GT paper demonstrates MC gives LOWER value than scenario-based
-      // Scenario-based: ~$9-11M (what most acquirers assume)
-      // Monte Carlo with 40% vol: ~$4-6M (the correct risk-adjusted value)
-      // This IS the GT paper's entire point: MC properly accounts for option-like risk
-      setBacktestComparison({
-        reported: null, // No single "reported" value — GT shows the comparison
-        computed: res.fairValue,
-        gap: null,
-        isDemo: true,
-        scenarioBasedValue: 9.1e6, // What scenario-based method would produce
-      });
-
-      // Run sensitivities
-      const sens = {};
-      sens["Volatility"] = runSensitivity(gtParams, "volatility", [0.15, 0.70]);
-      sens["Discount Rate"] = runSensitivity(gtParams, "discountRate", [0.06, 0.20]);
-      sens["Current Metric"] = runSensitivity(gtParams, "currentMetric", [gtParams.currentMetric * 0.5, gtParams.currentMetric * 1.5]);
-      sens["Growth Rate"] = runSensitivity(gtParams, "metricGrowthRate", [0, 0.20]);
-      setSensitivities(sens);
-
-      setProgress(100);
-      setTimeout(() => setView("results"), 300);
-    }, delay + 500);
+      setBacktestComparison({ reported: null, computed: null, gap: null, isDemo: true, scenarioBasedValue: 9.1e6 });
+      setVerification({ verified: true, overallConfidence: 100, recommendation: "proceed", errors: [], missingTerms: [] });
+      setView("review");
+    }, delay + 300);
   };
 
   const resetAll = () => { setView("landing"); setResults(null); setSensitivities(null); setExtractedData(null); setDocText(""); setFiles([]); setBacktestComparison(null); setMode(null); };
+
+  // Run valuation after user confirms extracted terms on review screen
+  const runFromReview = () => {
+    setView("processing"); setProgress(0);
+    setStage(`Running Monte Carlo (${MC_PATHS.toLocaleString()} paths)...`); setProgress(60);
+    setTimeout(() => {
+      const res = runMultiPeriodMC(params);
+      setResults(res);
+      setProgress(80); setStage("Generating sensitivity analysis...");
+      setTimeout(() => {
+        const sens = {};
+        sens["Volatility"] = runSensitivity(params, "volatility", [0.15, 0.70]);
+        sens["Metric Discount Rate"] = runSensitivity(params, "discountRate", [0.06, 0.20]);
+        sens["Current Metric"] = runSensitivity(params, "currentMetric", [params.currentMetric * 0.5, params.currentMetric * 1.5]);
+        sens["Growth Rate"] = runSensitivity(params, "metricGrowthRate", [0, 0.20]);
+        setSensitivities(sens);
+
+        // Update backtest comparison with computed value
+        if (backtestComparison) {
+          const bc = { ...backtestComparison, computed: res.fairValue };
+          if (bc.reported) bc.gap = Math.abs(res.fairValue - bc.reported) / bc.reported * 100;
+          setBacktestComparison(bc);
+        }
+
+        setProgress(100);
+        setTimeout(() => setView("results"), 300);
+      }, 100);
+    }, 200);
+  };
 
   // ============================================================
   // RENDER
@@ -1324,6 +1327,320 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
       </div>
     </div>
   );
+
+  // ---- REVIEW & CONFIRM ----
+  if (view === "review") {
+    const structures = ["binary", "linear", "tiered", "percentage", "cagr", "milestone"];
+    const confScore = verification?.overallConfidence || 0;
+    const confColor = confScore >= 80 ? c.success : confScore >= 50 ? c.warning : c.danger;
+    const confLabel = confScore >= 80 ? "High" : confScore >= 50 ? "Medium" : "Low";
+    const updatePeriod = (idx, field, val) => { const np = [...params.periods]; np[idx] = { ...np[idx], [field]: val }; setParams(p => ({ ...p, periods: np })); };
+    const addPeriod = () => { const last = params.periods[params.periods.length - 1]; setParams(p => ({ ...p, periods: [...p.periods, { ...last, year: last.year + 1, yearFromNow: (last.yearFromNow || last.year) + 1 }] })); };
+    const removePeriod = (idx) => { if (params.periods.length <= 1) return; setParams(p => ({ ...p, periods: p.periods.filter((_, i) => i !== idx) })); };
+
+    // ---- INTELLIGENT FIELD DIAGNOSTICS ENGINE ----
+    // For each field: status (ok|warning|missing|info), message, suggestion, impact, resolution
+    const isGT = backtestComparison?.isDemo;
+    const isBT = mode === "backtest";
+    const extractionNotes = extractedData?.earnout?.ambiguities || extractedData?.earnouts?.[0]?.ambiguities || [];
+
+    const getDiag = (field, value) => {
+      const missing = value === null || value === undefined || value === 0;
+      const diags = {
+        currentMetric: {
+          status: missing ? "missing" : "ok",
+          message: missing ? "Current metric value not found in the document." : (isGT ? "FY18 base EBITDA from GT example." : isBT ? "Extracted from most recent period actuals in the filing." : "Extracted from PPA report or management forecast."),
+          suggestion: missing ? "Use the most recent trailing twelve months (TTM) actual. For EBITDA, this should be adjusted EBITDA consistent with the earnout definition." : null,
+          impact: "The current metric anchors the growth projection. A 10% error here flows through to all period projections.",
+          resolution: missing ? "Check the acquisition closing financials or latest management reporting package." : null,
+        },
+        volatility: {
+          status: missing ? "missing" : value < 0.15 ? "warning" : value > 0.65 ? "warning" : "ok",
+          message: missing ? "Volatility not disclosed in the document."
+            : isGT ? "GT example states 40% EBITDA volatility derived from comparable company equity volatility."
+            : isBT ? "SEC filings rarely disclose volatility directly. This may be a default value."
+            : (value && !missing) ? "Extracted from PPA report comparable company analysis." : "Could not extract — the report may reference 'comparable company analysis' without stating the figure.",
+          suggestion: missing ? `Suggested: ${params.metric?.includes("Revenue") ? "15%–25%" : "30%–45%"} based on typical ${params.metric?.includes("Revenue") ? "revenue" : "EBITDA"} volatility for mid-market targets. EBITDA volatility is typically 1.5–2.5× revenue volatility due to operational leverage.`
+            : value < 0.15 ? "This seems low. EBITDA volatility below 15% is unusual — even stable businesses typically show 20%+. Verify against comparable company data."
+            : value > 0.65 ? "This is very high. Volatility above 65% is typical only for early-stage or biotech companies. Verify this reflects the metric, not equity volatility."
+            : null,
+          impact: `Volatility is the most sensitive input for ${params.periods[0]?.structure === "binary" ? "binary" : "threshold-based"} earnouts. A 5% change in volatility can move fair value by 10–15%.`,
+          resolution: missing ? "Upload the comparable company analysis exhibit, or check Kroll Cost of Capital Navigator / Duff & Phelps Valuation Handbook for industry volatility benchmarks." : null,
+        },
+        discountRate: {
+          status: missing ? "missing" : value < 0.06 ? "warning" : value > 0.20 ? "warning" : "ok",
+          message: missing ? "Metric discount rate not found. This is the required return for the metric's cash flows (typically WACC-based)."
+            : isGT ? "GT states 10.0% EBITDA discount rate."
+            : "Extracted from report. Verify this represents the metric-specific discount rate, not the earnout payoff discount rate.",
+          suggestion: missing ? `Suggested: 8%–14% for ${params.metric?.includes("Revenue") ? "revenue (typically lower risk premium than EBITDA)" : "EBITDA"}. Should be consistent with the WACC used in the PPA business enterprise valuation.`
+            : value < 0.06 ? "Below 6% is unusually low for a metric discount rate — this may be the risk-free rate or payoff discount rate, not the metric rate."
+            : value > 0.20 ? "Above 20% implies very high risk. Verify this isn't a blended rate that already includes credit risk."
+            : null,
+          impact: "The metric discount rate determines the risk premium used to convert management's projections to risk-neutral. Higher rate = lower risk-neutral metric = lower probability of hitting thresholds.",
+          resolution: missing ? "Check the PPA report's DCF / business enterprise valuation for the WACC, or the earnout methodology section for the 'required metric risk premium' (RMRP)." : null,
+        },
+        riskFreeRate: {
+          status: missing ? "missing" : "ok",
+          message: isGT ? "Approximated at 2.5% reflecting 2018 US Treasury rates." : "Risk-free rate matching the weighted-average earnout duration.",
+          suggestion: missing ? `Suggested: Use the US Treasury yield matching the earnout's weighted-average duration. For a ${params.periods.length}-year earnout, use the ${params.periods.length}-year Treasury rate.` : null,
+          impact: "Moderate. Affects both the risk-neutral drift and the payoff discount rate, but changes of 50bps have a relatively small impact.",
+          resolution: missing ? "Check the Federal Reserve's H.15 release for current Treasury yields, or the PPA report's risk-free rate assumption." : null,
+        },
+        creditAdj: {
+          status: params.isEscrowed ? "info" : missing ? "warning" : "ok",
+          message: params.isEscrowed ? "Credit adjustment is zero because earnout funds are held in escrow." 
+            : missing ? "Credit risk adjustment not stated. Since funds are NOT escrowed, counterparty credit risk should be reflected."
+            : isGT ? "Implied at 2.0% (risk-adjusted rate 4.5% = Rf 2.5% + credit 2.0%)."
+            : "Extracted from report.",
+          suggestion: params.isEscrowed ? null : missing ? "Suggested: 1%–3% for investment-grade acquirers, 3%–5% for non-investment-grade. Check the acquirer's credit profile or debt spreads." : null,
+          impact: params.isEscrowed ? "None — escrowed funds eliminate counterparty risk." : "Directly increases the payoff discount rate, reducing the present value of all future payments.",
+          resolution: missing && !params.isEscrowed ? "Review the acquirer's credit rating or recent debt issuance spreads. If the merger agreement provides for escrow, toggle the 'Escrowed' feature." : null,
+        },
+        metricGrowthRate: {
+          status: missing ? "warning" : "ok",
+          message: missing ? "Growth rate not explicitly stated." : isGT ? "Implied ~12% CAGR from management projections ($12M → $17M over 3 years)." : "Derived from management projections.",
+          suggestion: missing ? "Calculate from the projected metrics: if Current = $15M and Year 3 Projected = $20M, growth rate = (20/15)^(1/3) - 1 ≈ 10%." : null,
+          impact: "Growth rate affects the risk-neutral drift. Combined with the metric discount rate, it determines whether the simulated metric trends above or below thresholds.",
+          resolution: missing ? "Use the management forecast or budget projections for the earnout metric." : null,
+        },
+      };
+
+      // Period-level diagnostics
+      if (field === "projectedMetric") {
+        return {
+          status: missing ? "missing" : "ok",
+          message: missing ? "Projected metric for this period not found." : "Management's forecast for this measurement period.",
+          suggestion: missing ? `Suggested: Apply the growth rate (${fmtPct(params.metricGrowthRate)}) to the current metric. Year ${value || "N"} projected = ${fmt(params.currentMetric * Math.pow(1 + params.metricGrowthRate, value || 1))}.` : null,
+          impact: "The projected metric is the starting point for risk-neutral simulation. If projected = threshold, probability of payment is ~35–45% under typical volatility.",
+          resolution: missing ? "Check the management forecast update or budget for the specific measurement period." : null,
+        };
+      }
+      if (field === "threshold") {
+        return {
+          status: missing && params.periods[0]?.structure !== "percentage" ? "missing" : "ok",
+          message: missing ? "Threshold not found. For binary earnouts, this is required." : "The performance target that must be met or exceeded.",
+          suggestion: missing ? "Check the merger agreement or earnout schedule for the specific EBITDA/revenue target for each measurement period." : null,
+          impact: "The threshold is the strike price of the option. Small changes (±5%) can significantly affect the probability of payment.",
+          resolution: missing ? "The threshold is typically defined in the merger agreement, which may not be in the PPA report. Upload the merger agreement or earnout schedule." : null,
+        };
+      }
+
+      return diags[field] || { status: "ok", message: "", suggestion: null, impact: null, resolution: null };
+    };
+
+    // ---- ENHANCED EditField with inline diagnostics ----
+    const EditField = ({ label, value, onChange, type = "number", step, format, fieldKey, periodIdx, tooltip }) => {
+      const [showDiag, setShowDiag] = useState(false);
+      const diag = getDiag(fieldKey, value);
+      const isIssue = diag.status === "missing" || diag.status === "warning";
+      const statusColor = diag.status === "missing" ? c.danger : diag.status === "warning" ? c.warning : diag.status === "info" ? c.accent : c.success;
+      const statusIcon = diag.status === "missing" ? "alert" : diag.status === "warning" ? "alert" : diag.status === "info" ? "info" : "check";
+      const statusLabel = diag.status === "missing" ? "Not Found" : diag.status === "warning" ? "Review" : diag.status === "info" ? "Note" : "Extracted";
+
+      return (
+        <div style={{ marginBottom: 12 }}>
+          <div className="vf" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+            <span style={{ fontSize: 11, color: c.textMuted, display: "flex", alignItems: "center", gap: 4 }}>
+              {label}
+              {tooltip && <span title={tooltip} style={{ cursor: "help", opacity: 0.4 }}><Icon name="info" size={9} /></span>}
+            </span>
+            <button onClick={() => setShowDiag(!showDiag)} style={{ display: "flex", alignItems: "center", gap: 3, padding: "1px 6px", borderRadius: 3, border: "none", cursor: "pointer", fontSize: 9, fontWeight: 500, background: isIssue ? `${statusColor}12` : "transparent", color: statusColor }}>
+              <Icon name={statusIcon} size={9} color={statusColor} /> {statusLabel}
+            </button>
+          </div>
+          <input type={type} value={format === "percent" ? ((value || 0) * 100).toFixed(1) : value || ""} step={step}
+            onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) onChange(format === "percent" ? v / 100 : v); }}
+            style={{ width: "100%", padding: "6px 10px", fontSize: 12, fontFamily: "'IBM Plex Mono',monospace", border: `1.5px solid ${isIssue ? statusColor : c.cardBorder}`, borderRadius: 6, background: isIssue ? `${statusColor}06` : c.inputBg, color: c.text, outline: "none", textAlign: "right" }} />
+          
+          {/* Expandable diagnostics panel */}
+          {showDiag && (
+            <div style={{ marginTop: 6, padding: "8px 10px", background: tc ? "#1a2540" : "#fafbfc", border: `1px solid ${c.cardBorder}`, borderRadius: 6, fontSize: 10, lineHeight: 1.55 }}>
+              {/* Status message */}
+              <div style={{ color: c.text, marginBottom: diag.suggestion || diag.resolution ? 6 : 0 }}>
+                <Icon name={statusIcon} size={10} color={statusColor} /> {diag.message}
+              </div>
+              
+              {/* Suggestion */}
+              {diag.suggestion && (
+                <div style={{ padding: "4px 8px", background: "rgba(37,99,235,0.04)", borderRadius: 4, marginBottom: 4, color: c.accent }}>
+                  <strong>Suggested:</strong> {diag.suggestion}
+                </div>
+              )}
+              
+              {/* Sensitivity impact */}
+              {diag.impact && (
+                <div style={{ color: c.textMuted, marginBottom: diag.resolution ? 4 : 0 }}>
+                  <strong style={{ color: c.warning }}>Impact:</strong> {diag.impact}
+                </div>
+              )}
+              
+              {/* Resolution — what to upload */}
+              {diag.resolution && (
+                <div style={{ padding: "4px 8px", background: "rgba(5,150,105,0.04)", borderRadius: 4, color: c.success }}>
+                  <strong>To resolve:</strong> {diag.resolution}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // Count issues for summary
+    const issueFields = ["currentMetric", "volatility", "discountRate", "riskFreeRate", "creditAdj", "metricGrowthRate"];
+    const issueCount = issueFields.filter(f => { const d = getDiag(f, params[f]); return d.status === "missing" || d.status === "warning"; }).length;
+    const periodIssues = params.periods.reduce((count, p) => {
+      if (!p.projectedMetric) count++;
+      if (!p.threshold && p.structure !== "percentage") count++;
+      return count;
+    }, 0);
+    const totalIssues = issueCount + periodIssues;
+
+    return (
+      <div style={{ minHeight: "100vh", background: c.bg, fontFamily: "'Inter',system-ui,sans-serif", color: c.text }}>{fontLink}{hdr(true)}
+        <div className="r-p" style={{ maxWidth: 920, margin: "0 auto", padding: "28px" }}>
+          {/* Header */}
+          <div className="vf r-col" style={{ justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, gap: 8 }}>
+            <div>
+              <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 3, fontFamily: "'Source Serif 4',Georgia,serif" }}>Review Extracted Terms</h2>
+              <p style={{ fontSize: 12, color: c.textMuted }}>Verify all fields below. Click any status badge to see diagnostics, suggestions, and sensitivity impact.</p>
+            </div>
+            <div className="vf" style={{ gap: 10, alignItems: "center" }}>
+              {verification && (
+                <div className="vf" style={{ gap: 6, alignItems: "center" }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: confColor }} />
+                  <span style={{ fontSize: 11, color: confColor, fontWeight: 600 }}>Confidence: {confLabel} ({confScore}%)</span>
+                </div>
+              )}
+              {totalIssues > 0 && (
+                <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: "rgba(217,119,6,0.08)", color: c.warning, fontWeight: 600 }}>
+                  {totalIssues} field{totalIssues > 1 ? "s" : ""} need review
+                </span>
+              )}
+              {totalIssues === 0 && (
+                <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: "rgba(5,150,105,0.08)", color: c.success, fontWeight: 600 }}>
+                  All fields populated
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Verification warnings from extraction */}
+          {verification?.errors?.length > 0 && (
+            <div style={{ ...cardStyle, marginBottom: 12, padding: 14, borderColor: "rgba(220,38,38,0.15)", background: "rgba(220,38,38,0.02)" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: c.danger, marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}><Icon name="alert" size={13} color={c.danger} /> Extraction Issues</div>
+              {verification.errors.map((err, i) => <div key={i} style={{ fontSize: 11, color: c.textMuted, marginBottom: 2 }}>• <strong>{err.field}:</strong> {err.issue}</div>)}
+            </div>
+          )}
+
+          {/* Ambiguities from extraction */}
+          {extractionNotes.length > 0 && (
+            <div style={{ ...cardStyle, marginBottom: 12, padding: 14, borderColor: "rgba(37,99,235,0.15)", background: "rgba(37,99,235,0.02)" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: c.accent, marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}><Icon name="info" size={13} color={c.accent} /> Document Ambiguities</div>
+              {extractionNotes.map((note, i) => <div key={i} style={{ fontSize: 11, color: c.textMuted, marginBottom: 2 }}>• {note}</div>)}
+            </div>
+          )}
+
+          {/* GT Demo banner */}
+          {isGT && (
+            <div style={{ ...cardStyle, marginBottom: 12, padding: 14, borderColor: "rgba(5,150,105,0.15)", background: "rgba(5,150,105,0.02)" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: c.success, marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}><Icon name="target" size={13} color={c.success} /> Grant Thornton Benchmark Example</div>
+              <div style={{ fontSize: 11, color: c.textMuted, lineHeight: 1.55 }}>All terms pre-loaded from the GT article. Click any status badge to see the GT source for each assumption. You can modify any value to see how it affects the result.</div>
+            </div>
+          )}
+
+          <div className="vg r-stack" style={{ gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            {/* LEFT: Earnout Terms + Assumptions */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={cardStyle}>
+                <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, display: "flex", alignItems: "center", gap: 5 }}><Icon name="file" size={14} color={c.accent} /> Earnout Terms</h3>
+
+                <div style={{ marginBottom: 10 }}>
+                  <span style={{ fontSize: 11, color: c.textMuted, display: "block", marginBottom: 3 }}>Performance Metric</span>
+                  <input value={params.metric} onChange={e => setParams(p => ({ ...p, metric: e.target.value }))} style={{ width: "100%", padding: "6px 10px", fontSize: 12, border: `1px solid ${c.cardBorder}`, borderRadius: 6, background: c.inputBg, color: c.text, outline: "none" }} />
+                </div>
+
+                <EditField label="Current Metric ($)" value={params.currentMetric} onChange={v => setParams(p => ({ ...p, currentMetric: v }))} step={100000} fieldKey="currentMetric" />
+                <EditField label="Multi-Year Cap ($)" value={params.multiYearCap || 0} onChange={v => setParams(p => ({ ...p, multiYearCap: v, hasMultiYearCap: v > 0 }))} step={100000} fieldKey="multiYearCap" />
+                <EditField label="Payment Delay (days)" value={params.paymentDelay || 120} onChange={v => setParams(p => ({ ...p, paymentDelay: v }))} step={30} fieldKey="paymentDelay" />
+
+                {/* Toggle features */}
+                <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {[{ k: "hasCatchUp", l: "Catch-Up" }, { k: "hasClawback", l: "Clawback" }, { k: "hasAcceleration", l: "Acceleration" },
+                    { k: "hasCarryForward", l: "Carry-Forward" }, { k: "hasCumulativeTarget", l: "Cumulative Target" }, { k: "isEscrowed", l: "Escrowed" }, { k: "isMultiMetric", l: "Multi-Metric" },
+                  ].map(f => (
+                    <button key={f.k} onClick={() => setParams(p => ({ ...p, [f.k]: !p[f.k] }))}
+                      style={{ padding: "3px 8px", fontSize: 10, fontWeight: 500, borderRadius: 4, cursor: "pointer", border: `1px solid ${params[f.k] ? c.accent : c.cardBorder}`, background: params[f.k] ? c.accentLight : "transparent", color: params[f.k] ? c.accent : c.textDim, transition: "all 0.15s" }}>
+                      {params[f.k] ? "✓ " : ""}{f.l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Assumptions */}
+              <div style={cardStyle}>
+                <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, display: "flex", alignItems: "center", gap: 5 }}><Icon name="sliders" size={14} color={c.accent} /> Valuation Assumptions</h3>
+                <EditField label="Metric Growth Rate" value={params.metricGrowthRate} onChange={v => setParams(p => ({ ...p, metricGrowthRate: v }))} step={0.001} format="percent" fieldKey="metricGrowthRate" />
+                <EditField label="Volatility (σ)" value={params.volatility} onChange={v => setParams(p => ({ ...p, volatility: v }))} step={0.01} format="percent" fieldKey="volatility" />
+                <EditField label="Metric Discount Rate" value={params.discountRate} onChange={v => setParams(p => ({ ...p, discountRate: v }))} step={0.005} format="percent" fieldKey="discountRate" />
+                <EditField label="Risk-Free Rate" value={params.riskFreeRate} onChange={v => setParams(p => ({ ...p, riskFreeRate: v }))} step={0.001} format="percent" fieldKey="riskFreeRate" />
+                <EditField label="Credit Risk Adjustment" value={params.creditAdj || 0} onChange={v => setParams(p => ({ ...p, creditAdj: v }))} step={0.005} format="percent" fieldKey="creditAdj" />
+
+                <div style={{ marginTop: 8, padding: "6px 10px", background: "rgba(5,150,105,0.04)", borderRadius: 6, fontSize: 10, color: c.textMuted, lineHeight: 1.55 }}>
+                  <strong style={{ color: c.success }}>Derived:</strong> Risk Premium {fmtPct(params.discountRate - params.riskFreeRate)} • Payoff Disc. {fmtPct(params.riskFreeRate + (params.isEscrowed ? 0 : (params.creditAdj || 0)))} • RN Drift {fmtPct(params.metricGrowthRate - (params.discountRate - params.riskFreeRate))}
+                </div>
+              </div>
+            </div>
+
+            {/* RIGHT: Per-Period Terms */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={cardStyle}>
+                <div className="vf" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <h3 style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 5, margin: 0 }}><Icon name="calendar" size={14} color={c.accent} /> Measurement Periods ({params.periods.length})</h3>
+                  <button onClick={addPeriod} style={{ padding: "3px 8px", fontSize: 10, background: c.accentLight, border: `1px solid ${c.accent}33`, borderRadius: 4, color: c.accent, cursor: "pointer", fontWeight: 500 }}>+ Add Period</button>
+                </div>
+
+                {params.periods.map((p, i) => (
+                  <div key={i} style={{ marginBottom: 14, paddingBottom: 12, borderBottom: i < params.periods.length - 1 ? `1px solid ${c.cardBorder}` : "none" }}>
+                    <div className="vf" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: c.text }}>Period {i + 1} — Year {p.yearFromNow || i + 1}</span>
+                      <div className="vf" style={{ gap: 4, alignItems: "center" }}>
+                        <select value={p.structure} onChange={e => updatePeriod(i, "structure", e.target.value)}
+                          style={{ padding: "3px 6px", fontSize: 10, border: `1px solid ${c.cardBorder}`, borderRadius: 4, background: c.inputBg, color: c.accent, fontWeight: 600, cursor: "pointer" }}>
+                          {structures.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+                        </select>
+                        {params.periods.length > 1 && <button onClick={() => removePeriod(i)} style={{ padding: "2px 5px", fontSize: 9, background: "rgba(220,38,38,0.06)", border: `1px solid rgba(220,38,38,0.15)`, borderRadius: 3, color: c.danger, cursor: "pointer" }}>×</button>}
+                      </div>
+                    </div>
+
+                    <div className="vg" style={{ gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <EditField label="Projected Metric ($)" value={p.projectedMetric || 0} onChange={v => updatePeriod(i, "projectedMetric", v)} step={100000} fieldKey="projectedMetric" />
+                      <EditField label="Threshold ($)" value={p.threshold || 0} onChange={v => updatePeriod(i, "threshold", v)} step={100000} fieldKey="threshold" />
+                      {(p.structure === "binary" || p.structure === "milestone") && (
+                        <EditField label="Fixed Payment ($)" value={p.fixedPayment || 0} onChange={v => updatePeriod(i, "fixedPayment", v)} step={100000} fieldKey="fixedPayment" />
+                      )}
+                      {(p.structure === "linear" || p.structure === "percentage") && (
+                        <EditField label="Participation Rate" value={p.participationRate || 0} onChange={v => updatePeriod(i, "participationRate", v)} step={0.01} format="percent" fieldKey="participationRate" />
+                      )}
+                      <EditField label="Cap ($)" value={p.cap || 0} onChange={v => updatePeriod(i, "cap", v)} step={100000} fieldKey="cap" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="vf r-col" style={{ gap: 10, marginTop: 20 }}>
+            <button onClick={() => setView("landing")} style={{ padding: "10px 20px", background: "transparent", border: `1px solid ${c.cardBorder}`, borderRadius: 8, color: c.text, cursor: "pointer", fontSize: 12 }}>Back</button>
+            <button onClick={runFromReview} style={{ flex: 1, padding: "12px 24px", background: "linear-gradient(135deg,#2563eb,#1d4ed8)", border: "none", borderRadius: 8, color: "white", cursor: "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, boxShadow: "0 2px 8px rgba(37,99,235,0.3)" }}>
+              <Icon name="activity" size={15} color="white" /> Confirm & Run Monte Carlo ({MC_PATHS.toLocaleString()} paths)
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ---- RESULTS ----
   if (view === "results" && results) return (
