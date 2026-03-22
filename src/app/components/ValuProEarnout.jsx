@@ -449,193 +449,292 @@ const verifyExtraction = async (text, extracted) => {
 };
 
 // ============================================================
-// EXCEL GENERATION — Formula-linked workbook
+// EXCEL GENERATION — Professionally formatted with xlsx-js-style
 // ============================================================
 const generateExcel = async (params, results, sensitivities) => {
-  const XLSX = await import("xlsx");
+  const XLSX = await import("xlsx-js-style");
   const wb = XLSX.utils.book_new();
   const periods = params.periods || [];
   const nP = periods.length;
   const metricRiskPremium = Math.max(0, params.discountRate - params.riskFreeRate);
   const payoffDisc = params.payoffDiscountRate != null ? params.payoffDiscountRate : params.riskFreeRate + (params.isEscrowed ? 0 : (params.creditAdj || 0));
 
-  // ---- SHEET 1: INPUTS ----
-  // All assumptions in named cells so other sheets reference them
-  const inp = [];
-  inp.push(["ValuProEarnout — Model Inputs"], []);
-  inp.push(["EARNOUT TERMS"]); // Row 3
-  inp.push(["Performance Metric", params.metric || "EBITDA"]); // B4
-  inp.push(["Number of Periods", nP]); // B5
-  inp.push(["Multi-Year Cap ($)", params.multiYearCap || "None"]); // B6
-  inp.push(["Catch-Up", params.hasCatchUp ? "Yes" : "No"]); // B7
-  inp.push(["Clawback", params.hasClawback ? "Yes" : "No"]); // B8
-  inp.push(["Acceleration", params.hasAcceleration ? "Yes" : "No"]); // B9
-  inp.push(["Escrowed", params.isEscrowed ? "Yes" : "No"]); // B10
-  inp.push([]);
-  inp.push(["ASSUMPTIONS"]); // Row 12
-  inp.push(["Current Metric ($)", params.currentMetric]); // B13
-  inp.push(["Metric Growth Rate", params.metricGrowthRate]); // B14
-  inp.push(["Volatility (σ)", params.volatility]); // B15
-  inp.push(["Metric Discount Rate", params.discountRate]); // B16
-  inp.push(["Risk-Free Rate", params.riskFreeRate]); // B17
-  inp.push(["Credit Risk Adjustment", params.creditAdj || 0]); // B18
-  inp.push(["Payment Delay (days)", params.paymentDelay || 120]); // B19
-  inp.push([]);
-  inp.push(["DERIVED (formula-linked)"]); // Row 21
-  inp.push(["Metric Risk Premium", null]); // B22 — formula
-  inp.push(["Payoff Discount Rate", null]); // B23 — formula
-  inp.push(["Risk-Neutral Drift", null]); // B24 — formula
-  inp.push([]);
-  // Per-period inputs
-  inp.push(["PER-PERIOD TERMS"]); // Row 26
-  inp.push(["Period", "Year", "Structure", "Threshold ($)", "Participation Rate", "Fixed Payment ($)", "Cap ($)", "Projected Metric ($)"]); // Row 27
+  // ---- STYLE DEFINITIONS ----
+  const fontBase = { name: "Aptos", sz: 9 };
+  const fontBold = { ...fontBase, bold: true };
+  const fontHeader = { name: "Aptos", sz: 10, bold: true, color: { rgb: "FFFFFF" } };
+  const fontSection = { name: "Aptos", sz: 10, bold: true, color: { rgb: "1F3864" } };
+  const fontTitle = { name: "Aptos", sz: 12, bold: true, color: { rgb: "1F3864" } };
+  const fontSmall = { name: "Aptos", sz: 8, italic: true, color: { rgb: "808080" } };
+
+  const fillHeader = { fgColor: { rgb: "1F3864" } };
+  const fillSection = { fgColor: { rgb: "D6E4F0" } };
+  const fillInput = { fgColor: { rgb: "FFF2CC" } }; // Light yellow for input cells
+  const fillDerived = { fgColor: { rgb: "E2EFDA" } }; // Light green for formula cells
+  const fillWhite = { fgColor: { rgb: "FFFFFF" } };
+  const fillAlt = { fgColor: { rgb: "F2F2F2" } }; // Alternating row
+
+  const borderThin = { style: "thin", color: { rgb: "B4B4B4" } };
+  const borderMed = { style: "medium", color: { rgb: "1F3864" } };
+  const borders = { top: borderThin, bottom: borderThin, left: borderThin, right: borderThin };
+  const borderBottom = { bottom: borderMed };
+  const borderTop = { top: borderMed };
+
+  const alignR = { horizontal: "right", vertical: "center" };
+  const alignL = { horizontal: "left", vertical: "center" };
+  const alignC = { horizontal: "center", vertical: "center" };
+
+  const nf1 = "#,##0.0"; // 1 decimal
+  const nfDol = "#,##0";
+  const nfDol1 = "#,##0.0";
+  const nfPct = "0.0%";
+  const nfPct2 = "0.00%";
+  const nfDec2 = "0.00";
+  const nfDec4 = "0.0000";
+  const nfInt = "#,##0";
+
+  // Helper: create styled cell
+  const cell = (v, s = {}) => ({ v, t: typeof v === "number" ? "n" : "s", s });
+  const fcell = (f, s = {}) => ({ f, t: "n", s }); // formula cell
+
+  const sLabel = { font: fontBold, alignment: alignL, border: borders, fill: fillWhite };
+  const sInput = { font: fontBase, alignment: alignR, border: borders, fill: fillInput, numFmt: nfDol };
+  const sInputPct = { font: fontBase, alignment: alignR, border: borders, fill: fillInput, numFmt: nfPct };
+  const sInputInt = { font: fontBase, alignment: alignR, border: borders, fill: fillInput, numFmt: nfInt };
+  const sDerived = { font: fontBold, alignment: alignR, border: borders, fill: fillDerived, numFmt: nfPct };
+  const sDerivedLabel = { font: fontBold, alignment: alignL, border: borders, fill: fillDerived };
+  const sHdr = { font: fontHeader, alignment: alignC, border: borders, fill: { type: "pattern", patternType: "solid", ...fillHeader } };
+  const sSect = { font: fontSection, alignment: alignL, fill: { type: "pattern", patternType: "solid", ...fillSection }, border: borders };
+  const sNorm = { font: fontBase, alignment: alignR, border: borders, fill: fillWhite, numFmt: nfDol1 };
+  const sNormPct = { font: fontBase, alignment: alignR, border: borders, fill: fillWhite, numFmt: nfPct };
+  const sNormDec = { font: fontBase, alignment: alignR, border: borders, fill: fillWhite, numFmt: nfDec2 };
+  const sNormInt = { font: fontBase, alignment: alignR, border: borders, fill: fillWhite, numFmt: nfInt };
+  const sNormL = { font: fontBase, alignment: alignL, border: borders, fill: fillWhite };
+  const sBold = { font: fontBold, alignment: alignR, border: borders, fill: fillWhite, numFmt: nfDol1 };
+  const sBoldL = { font: fontBold, alignment: alignL, border: borders, fill: fillWhite };
+  const sTitle = { font: fontTitle, alignment: alignL };
+  const sNote = { font: fontSmall, alignment: alignL };
+  const sAlt = { font: fontBase, alignment: alignR, border: borders, fill: { type: "pattern", patternType: "solid", ...fillAlt }, numFmt: nfDol1 };
+  const sAltL = { font: fontBase, alignment: alignL, border: borders, fill: { type: "pattern", patternType: "solid", ...fillAlt } };
+
+  // ============ SHEET 1: INPUTS ============
+  const ws1 = {};
+  let r = 0;
+  const s1 = (row, col, val, style) => { const ref = XLSX.utils.encode_cell({ r: row, c: col }); ws1[ref] = typeof val === "object" && val.f ? { ...val, s: style } : { v: val, t: typeof val === "number" ? "n" : "s", s: style }; };
+  const s1f = (row, col, formula, style) => { const ref = XLSX.utils.encode_cell({ r: row, c: col }); ws1[ref] = { f: formula, t: "n", s: style }; };
+
+  // Title
+  s1(0, 0, "ValuProEarnout — Model Inputs", sTitle);
+  s1(1, 0, "All yellow cells are inputs. Green cells are formula-linked.", sNote);
+
+  // Section: Earnout Terms
+  r = 3;
+  s1(r, 0, "EARNOUT TERMS", sSect); s1(r, 1, "", sSect);
+  r++; s1(r, 0, "Performance Metric", sLabel); s1(r, 1, params.metric || "EBITDA", { ...sNormL, fill: fillInput });
+  r++; s1(r, 0, "Number of Periods", sLabel); s1(r, 1, nP, sInputInt);
+  r++; s1(r, 0, "Multi-Year Cap", sLabel); s1(r, 1, params.multiYearCap || 0, sInput);
+  r++; s1(r, 0, "Catch-Up", sLabel); s1(r, 1, params.hasCatchUp ? "Yes" : "No", { ...sNormL, fill: fillInput });
+  r++; s1(r, 0, "Clawback", sLabel); s1(r, 1, params.hasClawback ? "Yes" : "No", { ...sNormL, fill: fillInput });
+  r++; s1(r, 0, "Acceleration", sLabel); s1(r, 1, params.hasAcceleration ? "Yes" : "No", { ...sNormL, fill: fillInput });
+  r++; s1(r, 0, "Escrowed", sLabel); s1(r, 1, params.isEscrowed ? "Yes" : "No", { ...sNormL, fill: fillInput });
+
+  // Section: Assumptions
+  r += 2;
+  const assumpStart = r;
+  s1(r, 0, "KEY ASSUMPTIONS", sSect); s1(r, 1, "", sSect); s1(r, 2, "", sSect);
+  r++; s1(r, 0, "", sHdr); s1(r, 1, "Value", sHdr); s1(r, 2, "Type", sHdr);
+  r++; const rCM = r; s1(r, 0, "Current Metric ($)", sLabel); s1(r, 1, params.currentMetric, sInput); s1(r, 2, "Input", sNote);
+  r++; const rGR = r; s1(r, 0, "Metric Growth Rate", sLabel); s1(r, 1, params.metricGrowthRate, sInputPct); s1(r, 2, "Input", sNote);
+  r++; const rVol = r; s1(r, 0, "Volatility (σ)", sLabel); s1(r, 1, params.volatility, sInputPct); s1(r, 2, "Input", sNote);
+  r++; const rDR = r; s1(r, 0, "Metric Discount Rate", sLabel); s1(r, 1, params.discountRate, sInputPct); s1(r, 2, "Input", sNote);
+  r++; const rRF = r; s1(r, 0, "Risk-Free Rate", sLabel); s1(r, 1, params.riskFreeRate, sInputPct); s1(r, 2, "Input", sNote);
+  r++; const rCA = r; s1(r, 0, "Credit Risk Adjustment", sLabel); s1(r, 1, params.creditAdj || 0, sInputPct); s1(r, 2, "Input", sNote);
+  r++; s1(r, 0, "Payment Delay (days)", sLabel); s1(r, 1, params.paymentDelay || 120, sInputInt); s1(r, 2, "Input", sNote);
+  r++; // Blank row
+  r++; s1(r, 0, "DERIVED RATES", sSect); s1(r, 1, "", sSect); s1(r, 2, "", sSect);
+  r++; const rMRP = r; s1(r, 0, "Metric Risk Premium", sDerivedLabel); s1f(r, 1, `B${rDR + 1}-B${rRF + 1}`, sDerived); s1(r, 2, "Formula", sNote);
+  r++; const rPDR = r; s1(r, 0, "Payoff Discount Rate", sDerivedLabel); s1f(r, 1, params.isEscrowed ? `B${rRF + 1}` : `B${rRF + 1}+B${rCA + 1}`, sDerived); s1(r, 2, "Formula", sNote);
+  r++; const rRND = r; s1(r, 0, "Risk-Neutral Drift", sDerivedLabel); s1f(r, 1, `B${rGR + 1}-B${rMRP + 1}`, sDerived); s1(r, 2, "Formula", sNote);
+
+  // Section: Per-Period Terms
+  r += 2;
+  s1(r, 0, "PER-PERIOD TERMS", sSect); for (let c = 1; c <= 7; c++) s1(r, c, "", sSect);
+  r++;
+  ["Period", "Year", "Structure", "Threshold ($)", "Part. Rate", "Fixed Pmt ($)", "Cap ($)", "Projected ($)"].forEach((h, c) => s1(r, c, h, sHdr));
+  const periodDataStart = r + 1;
   periods.forEach((p, i) => {
-    inp.push([i + 1, p.yearFromNow || i + 1, p.structure, p.threshold || 0, p.participationRate || 0, p.fixedPayment || 0, p.cap || 0, p.projectedMetric || 0]);
+    r++;
+    const bg = i % 2 === 0 ? sNormL : sAltL;
+    const bn = i % 2 === 0 ? sNorm : sAlt;
+    const bp = i % 2 === 0 ? sNormPct : { ...sAlt, numFmt: nfPct };
+    s1(r, 0, i + 1, { ...(i % 2 === 0 ? sNormInt : { ...sAlt, numFmt: nfInt }) });
+    s1(r, 1, p.yearFromNow || i + 1, { ...(i % 2 === 0 ? sNormInt : { ...sAlt, numFmt: nfInt }) });
+    s1(r, 2, p.structure, bg);
+    s1(r, 3, p.threshold || 0, bn);
+    s1(r, 4, p.participationRate || 0, bp);
+    s1(r, 5, p.fixedPayment || 0, bn);
+    s1(r, 6, p.cap || 0, bn);
+    s1(r, 7, p.projectedMetric || 0, bn);
   });
 
-  const ws1 = XLSX.utils.aoa_to_sheet(inp);
-  // Add formulas for derived fields
-  // Row 22 (0-indexed row 21): Metric Risk Premium = B16 - B17
-  ws1["B22"] = { t: "n", f: "B16-B17" };
-  // Row 23: Payoff Discount Rate = B17 + B18 (or explicit if escrowed)
-  ws1["B23"] = { t: "n", f: params.isEscrowed ? "B17" : "B17+B18" };
-  // Row 24: Risk-Neutral Drift = B14 - B22
-  ws1["B24"] = { t: "n", f: "B14-B22" };
-
-  // Format percentages
-  const pctFmt = "0.0%";
-  ["B14","B15","B16","B17","B18","B22","B23","B24"].forEach(c => { if (ws1[c]) ws1[c].z = pctFmt; });
-  const dolFmt = "#,##0";
-  ["B13","B6"].forEach(c => { if (ws1[c] && typeof ws1[c].v === "number") ws1[c].z = dolFmt; });
-
-  // Column widths
-  ws1["!cols"] = [{ wch: 24 }, { wch: 18 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 18 }];
+  ws1["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r + 1, c: 7 } });
+  ws1["!cols"] = [{ wch: 26 }, { wch: 16 }, { wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 16 }];
   XLSX.utils.book_append_sheet(wb, ws1, "Inputs");
 
-  // ---- SHEET 2: VALUATION — formula-linked to Inputs ----
-  const val = [];
-  val.push(["ValuProEarnout — Valuation Output"], []);
-  val.push(["FAIR VALUE SUMMARY"]); // Row 3
-  val.push(["Fair Value (Mean, $)", results.fairValue]); // B4
-  val.push(["Standard Error ($)", results.stdError]); // B5
-  val.push(["95% CI — Low ($)", null]); // B6 — formula
-  val.push(["95% CI — High ($)", null]); // B7 — formula
-  val.push(["Probability of Any Payoff", results.probPayoff / 100]); // B8
-  val.push(["Monte Carlo Paths", MC_PATHS]); // B9
-  val.push([]);
-  val.push(["PERCENTILE DISTRIBUTION"]); // Row 11
-  val.push(["Percentile", "Fair Value ($)"]); // Row 12
-  const pctKeys = Object.keys(results.percentiles);
-  pctKeys.forEach((k, i) => {
-    val.push([k.replace("p", "") + "th", results.percentiles[k]]); // Row 13+
+  // ============ SHEET 2: VALUATION ============
+  const ws2 = {};
+  const s2 = (row, col, val, style) => { ws2[XLSX.utils.encode_cell({ r: row, c: col })] = { v: val, t: typeof val === "number" ? "n" : "s", s: style }; };
+  const s2f = (row, col, formula, style) => { ws2[XLSX.utils.encode_cell({ r: row, c: col })] = { f: formula, t: "n", s: style }; };
+
+  r = 0;
+  s2(0, 0, "ValuProEarnout — Valuation Output", sTitle);
+  s2(1, 0, "All values formula-linked to Inputs sheet where applicable.", sNote);
+
+  r = 3;
+  s2(r, 0, "FAIR VALUE SUMMARY", sSect); s2(r, 1, "", sSect);
+  r++; s2(r, 0, "", sHdr); s2(r, 1, "Value", sHdr);
+  r++; const rFV = r; s2(r, 0, "Fair Value (Mean)", sBoldL); s2(r, 1, results.fairValue, { ...sBold, numFmt: nfDol1 });
+  r++; const rSE = r; s2(r, 0, "Standard Error", sLabel); s2(r, 1, results.stdError, sNorm);
+  r++; s2(r, 0, "95% CI — Low", sLabel); s2f(r, 1, `B${rFV + 1}-1.96*B${rSE + 1}`, sNorm);
+  r++; s2(r, 0, "95% CI — High", sLabel); s2f(r, 1, `B${rFV + 1}+1.96*B${rSE + 1}`, sNorm);
+  r++; s2(r, 0, "Probability of Payoff", sLabel); s2(r, 1, results.probPayoff / 100, sNormPct);
+  r++; s2(r, 0, "Monte Carlo Paths", sLabel); s2(r, 1, MC_PATHS, sNormInt);
+  r++; const maxPay = params.multiYearCap || periods.reduce((s, p) => s + (p.cap || p.fixedPayment || 0), 0);
+  s2(r, 0, "Maximum Payout", sLabel); s2(r, 1, maxPay, sNorm);
+  r++; s2(r, 0, "Fair Value as % of Max", sLabel); s2f(r, 1, `B${rFV + 1}/B${r}`, sNormPct);
+
+  // Percentiles
+  r += 2;
+  s2(r, 0, "PERCENTILE DISTRIBUTION", sSect); s2(r, 1, "", sSect);
+  r++; s2(r, 0, "Percentile", sHdr); s2(r, 1, "Fair Value ($)", sHdr);
+  Object.entries(results.percentiles).forEach(([k, v], i) => {
+    r++;
+    const bg = i % 2 === 0 ? sNormL : sAltL;
+    const bn = i % 2 === 0 ? sNorm : sAlt;
+    s2(r, 0, k.replace("p", "") + "th", bg); s2(r, 1, v, bn);
   });
-  val.push([]);
-  val.push(["PER-PERIOD FAIR VALUE DECOMPOSITION"]); // dynamic row
-  val.push(["Period", "Mean FV ($)", "P25 ($)", "Median ($)", "P75 ($)", "% of Total FV"]);
-  const periodStartRow = val.length; // 0-indexed
+
+  // Per-period decomposition
+  r += 2;
+  s2(r, 0, "PER-PERIOD DECOMPOSITION", sSect); for (let c = 1; c <= 5; c++) s2(r, c, "", sSect);
+  r++; ["Period", "Mean FV ($)", "P25 ($)", "Median ($)", "P75 ($)", "% of Total"].forEach((h, c) => s2(r, c, h, sHdr));
+  const pdStart = r + 1;
   if (results.periodStats) {
     results.periodStats.forEach((ps, i) => {
-      val.push([`Period ${i + 1}`, ps.mean, ps.p25, ps.p50, ps.p75, null]); // F column = formula
+      r++;
+      const bg = i % 2 === 0 ? sNormL : sAltL;
+      const bn = i % 2 === 0 ? sNorm : sAlt;
+      s2(r, 0, `Period ${i + 1}`, bg); s2(r, 1, ps.mean, bn); s2(r, 2, ps.p25, bn); s2(r, 3, ps.p50, bn); s2(r, 4, ps.p75, bn);
+      s2f(r, 5, `B${r + 1}/B${rFV + 1}`, { ...(i % 2 === 0 ? sNormPct : { ...sAlt, numFmt: nfPct }) });
     });
-    val.push(["Total", null, null, null, null, null]); // Sum row
+    r++;
+    s2(r, 0, "Total", sBoldL);
+    s2f(r, 1, `SUM(B${pdStart + 1}:B${pdStart + nP})`, sBold);
+    s2f(r, 5, `B${r + 1}/B${rFV + 1}`, { ...sBold, numFmt: nfPct });
   }
 
-  const ws2 = XLSX.utils.aoa_to_sheet(val);
-  // CI formulas: B6 = B4 - 1.96 * B5, B7 = B4 + 1.96 * B5
-  ws2["B6"] = { t: "n", f: "B4-1.96*B5" };
-  ws2["B7"] = { t: "n", f: "B4+1.96*B5" };
-  ws2["B8"] = { t: "n", v: results.probPayoff / 100, z: "0.0%" };
-
-  // Per-period % of total and sum formulas
-  if (results.periodStats) {
-    results.periodStats.forEach((ps, i) => {
-      const row = periodStartRow + i + 1; // 1-indexed for Excel
-      ws2[`F${row}`] = { t: "n", f: `B${row}/B4` };
-      ws2[`F${row}`].z = "0.0%";
-    });
-    const sumRow = periodStartRow + nP + 1;
-    ws2[`B${sumRow}`] = { t: "n", f: `SUM(B${periodStartRow + 1}:B${periodStartRow + nP})` };
-    ws2[`F${sumRow}`] = { t: "n", f: `B${sumRow}/B4` };
-    ws2[`F${sumRow}`].z = "0.0%";
-  }
-
-  // Dollar formatting
-  ["B4","B5","B6","B7"].forEach(c => { if (ws2[c]) ws2[c].z = "#,##0"; });
-  ws2["!cols"] = [{ wch: 22 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+  ws2["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r + 1, c: 5 } });
+  ws2["!cols"] = [{ wch: 24 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
   XLSX.utils.book_append_sheet(wb, ws2, "Valuation");
 
-  // ---- SHEET 3: RISK-NEUTRAL BRIDGE (shows step-by-step computation) ----
-  const brg = [];
-  brg.push(["ValuProEarnout — Risk-Neutral Bridge"], []);
-  brg.push(["This sheet traces the fair value computation for each period step-by-step."], []);
-  brg.push(["Step", "Description", "Formula", ...periods.map((_, i) => `Period ${i + 1}`)]);
-  brg.push(["1", "Management Projected Metric ($)", "From PPA / forecast", ...periods.map(p => p.projectedMetric || 0)]);
-  brg.push(["2", "Metric Risk Premium", "=Inputs!B16 - Inputs!B17", ...periods.map(() => metricRiskPremium)]);
-  brg.push(["3", "Time to Payment (years)", "Year + delay/365", ...periods.map(p => (p.yearFromNow || 1) + (params.paymentDelay || 120) / 365)]);
-  brg.push(["4", "Risk-Neutral Discount Factor", "exp(-RiskPremium × T)", ...periods.map(p => Math.exp(-metricRiskPremium * (p.yearFromNow || 1)))]);
-  brg.push(["5", "Risk-Neutral Expected Metric ($)", "Projected × RN Factor", ...periods.map(p => (p.projectedMetric || 0) * Math.exp(-metricRiskPremium * (p.yearFromNow || 1)))]);
-  brg.push(["6", "Threshold ($)", "Earnout target", ...periods.map(p => p.threshold || 0)]);
-  brg.push(["7", "Moneyness (RN Metric / Threshold)", "Step 5 / Step 6", ...periods.map(p => {
-    const rnm = (p.projectedMetric || 0) * Math.exp(-metricRiskPremium * (p.yearFromNow || 1));
-    return p.threshold ? (rnm / p.threshold) : 0;
-  })]);
-  brg.push(["8", "Volatility (σ)", "From comparable companies", ...periods.map(() => params.volatility)]);
-  brg.push(["9", "σ × √T", "Uncertainty range", ...periods.map(p => params.volatility * Math.sqrt(p.yearFromNow || 1))]);
-  brg.push(["10", "Max Payoff ($)", "Fixed payment or cap", ...periods.map(p => p.fixedPayment || p.cap || 0)]);
+  // ============ SHEET 3: RN BRIDGE ============
+  const ws3 = {};
+  const s3 = (row, col, val, style) => { ws3[XLSX.utils.encode_cell({ r: row, c: col })] = { v: val, t: typeof val === "number" ? "n" : "s", s: style }; };
+
+  r = 0;
+  s3(0, 0, "ValuProEarnout — Risk-Neutral Valuation Bridge", sTitle);
+  s3(1, 0, "Step-by-step trace from projected metric to fair value per VFR 4 framework.", sNote);
+
+  r = 3;
+  s3(r, 0, "Step", sHdr); s3(r, 1, "Description", sHdr); s3(r, 2, "Formula / Source", sHdr);
+  periods.forEach((_, i) => s3(r, 3 + i, `Period ${i + 1}`, sHdr));
+
+  const bridgeRows = [
+    ["1", "Projected Metric ($)", "Management forecast", periods.map(p => p.projectedMetric || 0), nfDol],
+    ["2", "Metric Risk Premium", "Disc Rate − Rf", periods.map(() => metricRiskPremium), nfPct],
+    ["3", "Time to Payment (yrs)", "Year + delay/365", periods.map(p => (p.yearFromNow || 1) + (params.paymentDelay || 120) / 365), nfDec2],
+    ["4", "RN Discount Factor", "exp(−RP × T)", periods.map(p => Math.exp(-metricRiskPremium * (p.yearFromNow || 1))), nfDec4],
+    ["5", "RN Expected Metric ($)", "Row 1 × Row 4", periods.map(p => (p.projectedMetric || 0) * Math.exp(-metricRiskPremium * (p.yearFromNow || 1))), nfDol],
+    ["6", "Threshold ($)", "Earnout target", periods.map(p => p.threshold || 0), nfDol],
+    ["7", "Moneyness", "Row 5 ÷ Row 6", periods.map(p => { const rnm = (p.projectedMetric || 0) * Math.exp(-metricRiskPremium * (p.yearFromNow || 1)); return p.threshold ? rnm / p.threshold : 0; }), nfDec2],
+    ["8", "Volatility (σ)", "Comparable cos", periods.map(() => params.volatility), nfPct],
+    ["9", "σ × √T", "Uncertainty", periods.map(p => params.volatility * Math.sqrt(p.yearFromNow || 1)), nfPct],
+    ["10", "Max Payoff ($)", "Fixed pmt / cap", periods.map(p => p.fixedPayment || p.cap || 0), nfDol],
+  ];
   if (results.periodStats) {
-    brg.push(["11", "Monte Carlo Fair Value ($)", `Mean of ${MC_PATHS.toLocaleString()} simulations`, ...results.periodStats.map(ps => ps.mean)]);
-    brg.push(["12", "Implied Probability of Payoff", "MC FV / (MaxPayoff × disc factor)", ...results.periodStats.map((ps, i) => {
+    bridgeRows.push(["11", "MC Fair Value ($)", `${MC_PATHS.toLocaleString()} paths`, results.periodStats.map(ps => ps.mean), nfDol1]);
+    bridgeRows.push(["12", "Implied Prob. of Payoff", "Row 11 ÷ (Row 10 × PV)", results.periodStats.map((ps, i) => {
       const maxP = periods[i].fixedPayment || periods[i].cap || 1;
       const disc = Math.exp(-payoffDisc * ((periods[i].yearFromNow || 1) + (params.paymentDelay || 120) / 365));
       return maxP > 0 ? ps.mean / (maxP * disc) : 0;
-    })]);
+    }), nfPct]);
   }
-  brg.push([]);
-  brg.push(["", "Total Fair Value ($)", "", results.fairValue]);
-  brg.push(["", "Payoff Discount Rate", "Rf + Credit", payoffDisc]);
 
-  const ws3 = XLSX.utils.aoa_to_sheet(brg);
-  ws3["!cols"] = [{ wch: 6 }, { wch: 36 }, { wch: 28 }, ...periods.map(() => ({ wch: 16 }))];
+  bridgeRows.forEach((brow, bi) => {
+    r = 4 + bi;
+    const isAlt = bi % 2 === 1;
+    s3(r, 0, brow[0], isAlt ? { ...sAltL, numFmt: "0" } : { ...sNormL, numFmt: "0" });
+    s3(r, 1, brow[1], isAlt ? sAltL : sNormL);
+    s3(r, 2, brow[2], isAlt ? sAltL : sNormL);
+    brow[3].forEach((val, pi) => {
+      s3(r, 3 + pi, val, { font: fontBase, alignment: alignR, border: borders, fill: isAlt ? { type: "pattern", patternType: "solid", ...fillAlt } : fillWhite, numFmt: brow[4] });
+    });
+  });
+
+  r = 4 + bridgeRows.length + 1;
+  s3(r, 0, "", sBoldL); s3(r, 1, "Total Fair Value ($)", sBoldL); s3(r, 2, "", sBoldL);
+  s3(r, 3, results.fairValue, { ...sBold, numFmt: nfDol1 });
+  r++;
+  s3(r, 1, "Payoff Discount Rate", sLabel); s3(r, 3, payoffDisc, { ...sNormPct });
+
+  ws3["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r + 1, c: 3 + nP - 1 } });
+  ws3["!cols"] = [{ wch: 6 }, { wch: 28 }, { wch: 22 }, ...periods.map(() => ({ wch: 16 }))];
   XLSX.utils.book_append_sheet(wb, ws3, "RN Bridge");
 
-  // ---- SHEET 4: SENSITIVITY ----
+  // ============ SHEET 4: SENSITIVITY ============
   if (sensitivities) {
-    const sd = [["ValuProEarnout — Sensitivity Analysis"], [],
-      ["Each column varies one input while holding all others constant at base case values."], [],
-    ];
+    const ws4 = {};
+    const s4 = (row, col, val, style) => { ws4[XLSX.utils.encode_cell({ r: row, c: col })] = { v: val, t: typeof val === "number" ? "n" : "s", s: style }; };
+    r = 0;
+    s4(0, 0, "ValuProEarnout — Sensitivity Analysis", sTitle);
+    s4(1, 0, "Each parameter varied independently; all others held at base case.", sNote);
+    r = 3;
     const sensEntries = Object.entries(sensitivities);
-    // Headers
-    const hdrRow = [""];
-    sensEntries.forEach(([label]) => { hdrRow.push(label + " (Input)"); hdrRow.push(label + " (FV $)"); });
-    sd.push(hdrRow);
-    // Data rows
+    s4(r, 0, "#", sHdr);
+    sensEntries.forEach(([label], si) => { s4(r, 1 + si * 2, label + " (Input)", sHdr); s4(r, 2 + si * 2, label + " (FV $)", sHdr); });
     const maxLen = Math.max(...sensEntries.map(([, d]) => d.length));
-    for (let r = 0; r < maxLen; r++) {
-      const row = [r + 1];
-      sensEntries.forEach(([, data]) => {
-        row.push(data[r]?.value ?? "");
-        row.push(data[r]?.fairValue ?? "");
+    for (let ri = 0; ri < maxLen; ri++) {
+      r = 4 + ri;
+      const isAlt = ri % 2 === 1;
+      s4(r, 0, ri + 1, isAlt ? { ...sAlt, numFmt: nfInt } : sNormInt);
+      sensEntries.forEach(([label, data], si) => {
+        const inputFmt = label.includes("Metric") && !label.includes("Rate") ? nfDol : nfPct;
+        s4(r, 1 + si * 2, data[ri]?.value ?? "", { font: fontBase, alignment: alignR, border: borders, fill: isAlt ? { type: "pattern", patternType: "solid", ...fillAlt } : fillWhite, numFmt: inputFmt });
+        s4(r, 2 + si * 2, data[ri]?.fairValue ?? "", { font: fontBase, alignment: alignR, border: borders, fill: isAlt ? { type: "pattern", patternType: "solid", ...fillAlt } : fillWhite, numFmt: nfDol1 });
       });
-      sd.push(row);
     }
-    sd.push([]);
-    sd.push(["Base Case Fair Value", results.fairValue]);
-
-    const ws4 = XLSX.utils.aoa_to_sheet(sd);
-    ws4["!cols"] = [{ wch: 6 }, ...sensEntries.flatMap(() => [{ wch: 18 }, { wch: 18 }])];
+    r = 4 + maxLen + 1;
+    s4(r, 0, "", sBoldL); s4(r, 1, "Base Case FV", sBoldL); s4(r, 2, results.fairValue, { ...sBold, numFmt: nfDol1 });
+    ws4["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r + 1, c: sensEntries.length * 2 } });
+    ws4["!cols"] = [{ wch: 5 }, ...sensEntries.flatMap(() => [{ wch: 18 }, { wch: 16 }])];
     XLSX.utils.book_append_sheet(wb, ws4, "Sensitivity");
   }
 
-  // ---- SHEET 5: DISTRIBUTION ----
-  const dist = [["ValuProEarnout — Distribution Data"], [],
-    ["Bin Center ($)", "Frequency", "Cumulative %"]];
-  let cumul = 0;
-  results.histogram.forEach(h => {
-    cumul += h.count;
-    dist.push([h.x, h.count, cumul / MC_PATHS]);
+  // ============ SHEET 5: DISTRIBUTION ============
+  const ws5 = {};
+  const s5 = (row, col, val, style) => { ws5[XLSX.utils.encode_cell({ r: row, c: col })] = { v: val, t: typeof val === "number" ? "n" : "s", s: style }; };
+  s5(0, 0, "ValuProEarnout — Distribution Data", sTitle);
+  s5(2, 0, "Bin ($)", sHdr); s5(2, 1, "Frequency", sHdr); s5(2, 2, "Cumulative %", sHdr);
+  let cum = 0;
+  results.histogram.forEach((h, i) => {
+    cum += h.count;
+    const isAlt = i % 2 === 1;
+    s5(3 + i, 0, h.x, isAlt ? sAlt : sNorm);
+    s5(3 + i, 1, h.count, isAlt ? { ...sAlt, numFmt: nfInt } : sNormInt);
+    s5(3 + i, 2, cum / MC_PATHS, isAlt ? { ...sAlt, numFmt: nfPct } : sNormPct);
   });
-  const ws5 = XLSX.utils.aoa_to_sheet(dist);
-  ws5["!cols"] = [{ wch: 18 }, { wch: 12 }, { wch: 14 }];
+  ws5["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 3 + results.histogram.length, c: 2 } });
+  ws5["!cols"] = [{ wch: 16 }, { wch: 12 }, { wch: 14 }];
   XLSX.utils.book_append_sheet(wb, ws5, "Distribution");
 
   const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
@@ -688,17 +787,19 @@ const generateMemo = (params, results, sensitivities, format = "pdf") => {
   }, { label: "", range: 0 }).label : "";
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>ValuProEarnout — Fair Value Memorandum</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;font-size:11pt;line-height:1.7;color:#1a1a1a;max-width:8.5in;margin:0 auto;padding:1in}
-h1{font-size:17pt;font-weight:700;margin-bottom:4pt;color:#111}h2{font-size:13pt;font-weight:700;margin-top:22pt;margin-bottom:8pt;border-bottom:1.5px solid #333;padding-bottom:4pt;color:#111}
-h3{font-size:11pt;font-weight:700;margin-top:14pt;margin-bottom:4pt;color:#333}
-p{margin-bottom:10pt;text-align:justify}table{width:100%;border-collapse:collapse;margin:10pt 0;font-size:10pt}th,td{border:1px solid #bbb;padding:5pt 8pt;text-align:left}
-th{background:#f0f0f0;font-weight:700;font-family:'Helvetica Neue',Arial,sans-serif;font-size:9pt;text-transform:uppercase;letter-spacing:0.03em}
-td.n{text-align:right;font-family:'Courier New',monospace;font-size:10pt}td.h{font-weight:700;background:#fafafa}
-.hdr{display:flex;justify-content:space-between;margin-bottom:24pt;padding-bottom:12pt;border-bottom:2pt solid #1a1a1a}
-.ftr{margin-top:36pt;padding-top:12pt;border-top:1pt solid #999;font-size:9pt;color:#666;font-family:'Helvetica Neue',Arial,sans-serif}
-.note{background:#f7f7f7;border-left:3pt solid #2563eb;padding:8pt 12pt;margin:10pt 0;font-size:10pt;line-height:1.6}
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Aptos,'Calibri','Segoe UI',sans-serif;font-size:9pt;line-height:1.65;color:#1a1a1a;max-width:8.5in;margin:0 auto;padding:1in}
+h1{font-size:13pt;font-weight:700;margin-bottom:3pt;color:#1F3864}h2{font-size:11pt;font-weight:700;margin-top:18pt;margin-bottom:6pt;border-bottom:1.5px solid #1F3864;padding-bottom:3pt;color:#1F3864}
+h3{font-size:10pt;font-weight:700;margin-top:12pt;margin-bottom:3pt;color:#333}
+p{margin-bottom:8pt;text-align:justify}table{width:100%;border-collapse:collapse;margin:8pt 0;font-size:9pt;font-family:Aptos,'Calibri',sans-serif}th,td{border:1px solid #B4B4B4;padding:4pt 6pt;text-align:left;vertical-align:top}
+th{background:#1F3864;color:#fff;font-weight:600;font-size:8pt;text-transform:uppercase;letter-spacing:0.04em}
+td.n{text-align:right;font-family:Aptos,'Calibri',sans-serif;font-variant-numeric:tabular-nums}td.h{font-weight:700;background:#F2F2F2}
+tr:nth-child(even){background:#F8F9FA}
+.hdr{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:20pt;padding-bottom:10pt;border-bottom:2pt solid #1F3864}
+.ftr{margin-top:30pt;padding-top:10pt;border-top:1pt solid #999;font-size:7.5pt;color:#666}
+.note{background:#F2F7FB;border-left:3pt solid #2563eb;padding:6pt 10pt;margin:10pt 0;font-size:8pt;line-height:1.55}
+strong{font-weight:700}em{font-style:italic}
 @media print{body{padding:0.5in}}</style></head><body>
-<div class="hdr"><div><h1>Contingent Consideration Fair Value Measurement</h1><p style="font-size:10pt;color:#555;font-family:'Helvetica Neue',Arial,sans-serif">Methodology Memorandum — ${date}</p></div><div style="text-align:right;font-family:'Helvetica Neue',Arial,sans-serif"><strong style="font-size:11pt">ValuProEarnout</strong><br><span style="font-size:9pt;color:#666">Automated Remeasurement Platform</span></div></div>
+<div class="hdr"><div><h1>Contingent Consideration Fair Value Measurement</h1><p style="font-size:8pt;color:#555">Methodology Memorandum — ${date}</p></div><div style="text-align:right"><strong style="font-size:10pt;color:#1F3864">ValuProEarnout</strong><br><span style="font-size:7.5pt;color:#666">Automated Remeasurement Platform</span></div></div>
 
 <h2>1. Executive Summary</h2>
 <p>This memorandum documents the fair value measurement of contingent consideration (earnout) liability in accordance with ASC 820, <em>Fair Value Measurement</em>, and ASC 805, <em>Business Combinations</em>. The earnout is classified as Level 3 within the fair value hierarchy, as significant unobservable inputs are required for its measurement.</p>
