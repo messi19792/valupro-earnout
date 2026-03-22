@@ -295,7 +295,7 @@ const fmtPct=(n)=>n==null?"—":`${(n*100).toFixed(1)}%`;
 // ============================================================
 const generateExcel = async (params,results,sensitivities) => {
   // Dynamic import of SheetJS
-  const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
+  const XLSX = await import("xlsx");
   const wb = XLSX.utils.book_new();
   
   // Sheet 1: Summary
