@@ -295,7 +295,7 @@ const fmtPct=(n)=>n==null?"—":`${(n*100).toFixed(1)}%`;
 // ============================================================
 const generateExcel = async (params,results,sensitivities) => {
   // Dynamic import of SheetJS
-  const XLSX = await import("xlsx");
+  const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
   const wb = XLSX.utils.book_new();
   
   // Sheet 1: Summary
@@ -562,15 +562,15 @@ const ParamSlider = ({label,value,onChange,min,max,step,format="number",suffix="
   return (
     <div style={{marginBottom:14}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
-        <span style={{fontSize:12,color:tc?"#94a3b8":"#64748b",display:"flex",alignItems:"center",gap:4}}>
+        <span style={{fontSize:12,color:tc?"#8896b0":"#6b7280",display:"flex",alignItems:"center",gap:4}}>
           {label}
           {tooltip&&<span title={tooltip} style={{cursor:"help",opacity:0.5}}><Icon name="info" size={11}/></span>}
         </span>
-        <span style={{fontSize:13,fontFamily:"'JetBrains Mono',monospace",color:tc?"#e2e8f0":"#1e293b",fontWeight:600}}>{displayVal}</span>
+        <span style={{fontSize:13,fontFamily:"'IBM Plex Mono',monospace",color:tc?"#e8edf5":"#111827",fontWeight:600}}>{displayVal}</span>
       </div>
       <input type="range" min={min} max={max} step={step} value={value} onChange={e=>onChange(parseFloat(e.target.value))}
         style={{width:"100%",accentColor:"#6366f1",height:4,cursor:"pointer"}} />
-      <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:tc?"#475569":"#94a3b8",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:tc?"#556480":"#9ca3af",fontFamily:"'IBM Plex Mono',monospace",marginTop:2}}>
         <span>{format==="percent"?fmtPct(min):format==="currency"?fmt(min):min}</span>
         <span>{format==="percent"?fmtPct(max):format==="currency"?fmt(max):max}</span>
       </div>
@@ -595,12 +595,12 @@ const TornadoChart = ({sensitivities,baseValue,theme}) => {
         const widthPct=((entry.max-entry.min)/range)*100;
         const basePct=((baseValue-globalMin)/range)*100;
         return <div key={i}>
-          <div style={{fontSize:11,color:tc?"#94a3b8":"#64748b",marginBottom:2}}>{entry.label}</div>
+          <div style={{fontSize:11,color:tc?"#8896b0":"#6b7280",marginBottom:2}}>{entry.label}</div>
           <div style={{position:"relative",height:24,background:tc?"#1e293b":"#e2e8f0",borderRadius:4}}>
             <div style={{position:"absolute",left:`${leftPct}%`,width:`${widthPct}%`,height:"100%",background:"linear-gradient(90deg,#ef4444,#6366f1,#22c55e)",borderRadius:4,opacity:0.8}} />
             <div style={{position:"absolute",left:`${basePct}%`,top:0,bottom:0,width:2,background:"#f59e0b"}} />
-            <div style={{position:"absolute",left:4,top:4,fontSize:10,color:tc?"#e2e8f0":"#1e293b",fontFamily:"'JetBrains Mono',monospace"}}>{fmt(entry.min)}</div>
-            <div style={{position:"absolute",right:4,top:4,fontSize:10,color:tc?"#e2e8f0":"#1e293b",fontFamily:"'JetBrains Mono',monospace"}}>{fmt(entry.max)}</div>
+            <div style={{position:"absolute",left:4,top:4,fontSize:10,color:tc?"#e8edf5":"#111827",fontFamily:"'IBM Plex Mono',monospace"}}>{fmt(entry.min)}</div>
+            <div style={{position:"absolute",right:4,top:4,fontSize:10,color:tc?"#e8edf5":"#111827",fontFamily:"'IBM Plex Mono',monospace"}}>{fmt(entry.max)}</div>
           </div>
         </div>;
       })}
@@ -612,7 +612,7 @@ const TornadoChart = ({sensitivities,baseValue,theme}) => {
 // MAIN APPLICATION
 // ============================================================
 export default function ValuProEarnout(){
-  const [theme,setTheme]=useState("dark");
+  const [theme,setTheme]=useState("light");
   const [view,setView]=useState("landing"); // landing, mode_select, backtest_upload, live_upload, processing, results
   const [mode,setMode]=useState(null); // "backtest" or "live"
   
@@ -639,20 +639,25 @@ export default function ValuProEarnout(){
   const [backtestComparison,setBacktestComparison]=useState(null);
   const [isComputing,setIsComputing]=useState(false);
   
-  // Theme colors
+  // Theme colors — refined palette
   const tc=theme==="dark";
   const c={
-    bg:tc?"#0a0e1a":"#fafbfc",
-    card:tc?"#111827":"#ffffff",
-    cardBorder:tc?"#1e293b":"#e2e8f0",
-    accent:"#6366f1",
-    accentGlow:tc?"rgba(99,102,241,0.15)":"rgba(99,102,241,0.08)",
-    success:"#22c55e",warning:"#f59e0b",danger:"#ef4444",
-    text:tc?"#e2e8f0":"#1e293b",
-    textMuted:tc?"#94a3b8":"#64748b",
-    textDim:tc?"#475569":"#94a3b8",
+    bg:tc?"#0c1222":"#f8f9fb",
+    card:tc?"#151e30":"#ffffff",
+    cardBorder:tc?"#1e2d4a":"#e5e7eb",
+    cardShadow:tc?"none":"0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)",
+    accent:"#2563eb",
+    accentLight:tc?"rgba(37,99,235,0.12)":"rgba(37,99,235,0.06)",
+    accentHover:tc?"rgba(37,99,235,0.2)":"rgba(37,99,235,0.1)",
+    success:"#059669",warning:"#d97706",danger:"#dc2626",
+    text:tc?"#e8edf5":"#111827",
+    textSecondary:tc?"#a3b1cc":"#374151",
+    textMuted:tc?"#8896b0":"#6b7280",
+    textDim:tc?"#556480":"#9ca3af",
+    headerBg:tc?"rgba(12,18,34,0.85)":"rgba(255,255,255,0.92)",
+    inputBg:tc?"#1a2540":"#f3f4f6",
   };
-  const cardStyle={background:c.card,border:`1px solid ${c.cardBorder}`,borderRadius:14,padding:22,position:"relative"};
+  const cardStyle={background:c.card,border:`1px solid ${c.cardBorder}`,borderRadius:12,padding:22,position:"relative",boxShadow:c.cardShadow};
 
   // Build payoff function from params
   const buildPayoffFn = useCallback((p=params)=>{
@@ -792,25 +797,25 @@ export default function ValuProEarnout(){
   // ============================================================
   // RENDER
   // ============================================================
-  const fontLink=<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Playfair+Display:wght@400;600;700&display=swap" rel="stylesheet"/>;
+  const fontLink=<><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Source+Serif+4:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet"/><style>{`*{box-sizing:border-box}body{font-family:'Inter',system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}::selection{background:${c.accent};color:white}`}</style></>;
   
   const themeToggle=(
-    <button onClick={()=>setTheme(t=>t==="dark"?"light":"dark")} style={{padding:"6px 10px",background:"transparent",border:`1px solid ${c.cardBorder}`,borderRadius:8,color:c.text,cursor:"pointer",display:"flex",alignItems:"center",gap:4,fontSize:12}}>
-      <Icon name={tc?"sun":"moon"} size={14}/>{tc?"Light":"Dark"}
+    <button onClick={()=>setTheme(t=>t==="dark"?"light":"dark")} style={{padding:"6px 12px",background:c.inputBg,border:`1px solid ${c.cardBorder}`,borderRadius:8,color:c.textMuted,cursor:"pointer",display:"flex",alignItems:"center",gap:5,fontSize:12,fontWeight:500,fontFamily:"'Inter',sans-serif",transition:"all 0.15s"}}>
+      <Icon name={tc?"sun":"moon"} size={13}/>{tc?"Light":"Dark"}
     </button>
   );
 
   const header=(showBack=false)=>(
-    <header style={{padding:"14px 32px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:`1px solid ${c.cardBorder}`,background:tc?"rgba(17,24,39,0.8)":"rgba(255,255,255,0.9)",backdropFilter:"blur(12px)",position:"sticky",top:0,zIndex:100}}>
-      <div style={{display:"flex",alignItems:"center",gap:12}}>
-        {showBack&&<button onClick={()=>{setView("landing");setResults(null);setSensitivities(null);setExtractedData(null);setDocText("");setFiles([]);setBacktestComparison(null);}} style={{background:"none",border:"none",color:c.textMuted,cursor:"pointer",padding:4}}><Icon name="chevronRight" size={16}/></button>}
-        <div style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}} onClick={()=>setView("landing")}>
-          <div style={{width:32,height:32,borderRadius:8,background:"linear-gradient(135deg,#6366f1,#8b5cf6)",display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="scale" size={16} color="white"/></div>
-          <span style={{fontSize:18,fontWeight:700,color:c.text}}>ValuPro<span style={{color:c.accent}}>Earnout</span></span>
+    <header style={{padding:"12px 36px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:`1px solid ${c.cardBorder}`,background:c.headerBg,backdropFilter:"blur(16px)",position:"sticky",top:0,zIndex:100}}>
+      <div style={{display:"flex",alignItems:"center",gap:14}}>
+        {showBack&&<button onClick={()=>{setView("landing");setResults(null);setSensitivities(null);setExtractedData(null);setDocText("");setFiles([]);setBacktestComparison(null);}} style={{background:"none",border:"none",color:c.textMuted,cursor:"pointer",padding:4,transform:"rotate(180deg)"}}><Icon name="chevronRight" size={16}/></button>}
+        <div style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer"}} onClick={()=>setView("landing")}>
+          <div style={{width:30,height:30,borderRadius:8,background:"linear-gradient(135deg,#2563eb,#1d4ed8)",display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="scale" size={15} color="white"/></div>
+          <span style={{fontSize:16,fontWeight:600,color:c.text,letterSpacing:"-0.3px"}}>ValuPro<span style={{color:c.accent}}>Earnout</span></span>
         </div>
       </div>
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
-        {mode&&<span style={{padding:"4px 12px",borderRadius:100,background:mode==="backtest"?"rgba(34,197,94,0.1)":"rgba(99,102,241,0.1)",fontSize:11,color:mode==="backtest"?c.success:c.accent,fontWeight:500}}>{mode==="backtest"?"Backtest Mode":"Live Valuation"}</span>}
+        {mode&&<span style={{padding:"4px 12px",borderRadius:6,background:mode==="backtest"?tc?"rgba(5,150,105,0.12)":"rgba(5,150,105,0.06)":c.accentLight,fontSize:11,color:mode==="backtest"?c.success:c.accent,fontWeight:500,letterSpacing:"0.01em"}}>{mode==="backtest"?"Backtest":"Live Valuation"}</span>}
         {themeToggle}
       </div>
     </header>
@@ -819,64 +824,64 @@ export default function ValuProEarnout(){
   // ---- LANDING ----
   if(view==="landing"){
     return (
-      <div style={{minHeight:"100vh",background:tc?`radial-gradient(ellipse at 30% 0%,rgba(99,102,241,0.08) 0%,transparent 60%),${c.bg}`:c.bg,fontFamily:"'DM Sans',sans-serif",color:c.text}}>
+      <div style={{minHeight:"100vh",background:c.bg,fontFamily:"'Inter',system-ui,sans-serif",color:c.text}}>
         {fontLink}{header()}
-        <main style={{maxWidth:800,margin:"0 auto",padding:"80px 32px",textAlign:"center"}}>
-          <div style={{display:"inline-flex",padding:"6px 16px",borderRadius:100,background:c.accentGlow,border:`1px solid ${tc?"rgba(99,102,241,0.2)":"rgba(99,102,241,0.15)"}`,fontSize:12,fontWeight:500,color:c.accent,marginBottom:24,gap:6,alignItems:"center"}}>
-            <Icon name="sparkles" size={13} color={c.accent}/> Quarterly Earnout Remeasurement — Automated
+        <main style={{maxWidth:760,margin:"0 auto",padding:"100px 36px 60px",textAlign:"center"}}>
+          <div style={{display:"inline-flex",padding:"5px 14px",borderRadius:6,background:c.accentLight,border:`1px solid ${tc?"rgba(37,99,235,0.2)":"rgba(37,99,235,0.12)"}`,fontSize:11,fontWeight:500,color:c.accent,marginBottom:28,gap:5,alignItems:"center",letterSpacing:"0.02em"}}>
+            <Icon name="sparkles" size={12} color={c.accent}/> Quarterly Earnout Remeasurement — Automated
           </div>
-          <h1 style={{fontSize:48,fontWeight:700,lineHeight:1.1,marginBottom:16,letterSpacing:"-1.5px",fontFamily:"'Playfair Display',serif",color:c.text}}>
-            Stop Paying $10K/Quarter<br/>
-            <span style={{background:"linear-gradient(135deg,#6366f1,#a78bfa,#c084fc)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>
-              For a Number Refresh
+          <h1 style={{fontSize:44,fontWeight:700,lineHeight:1.12,marginBottom:18,letterSpacing:"-1.2px",fontFamily:"'Source Serif 4','Georgia',serif",color:c.text}}>
+            Stop overpaying for<br/>
+            <span style={{color:c.accent}}>
+              a quarterly number refresh
             </span>
           </h1>
-          <p style={{fontSize:17,color:c.textMuted,maxWidth:560,margin:"0 auto",lineHeight:1.7,marginBottom:48}}>
+          <p style={{fontSize:16,color:c.textMuted,maxWidth:520,margin:"0 auto",lineHeight:1.75,marginBottom:56,fontWeight:400}}>
             Upload your PPA valuation report once. Update your forecast each quarter. 
-            Get an audit-ready fair value with methodology memo in 30 minutes — not 3 weeks.
+            Get an audit-ready fair value with methodology memo in minutes.
           </p>
           
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,maxWidth:640,margin:"0 auto 48px"}}>
-            <div onClick={()=>{setMode("backtest");setView("backtest_upload");}} style={{...cardStyle,cursor:"pointer",padding:28,textAlign:"left",transition:"border-color 0.2s"}} onMouseEnter={e=>e.currentTarget.style.borderColor=c.success} onMouseLeave={e=>e.currentTarget.style.borderColor=c.cardBorder}>
-              <div style={{width:40,height:40,borderRadius:10,background:"rgba(34,197,94,0.1)",display:"flex",alignItems:"center",justifyContent:"center",color:c.success,marginBottom:14}}>
-                <Icon name="target" size={20} color={c.success}/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,maxWidth:620,margin:"0 auto 56px"}}>
+            <div onClick={()=>{setMode("backtest");setView("backtest_upload");}} style={{...cardStyle,cursor:"pointer",padding:30,textAlign:"left",transition:"all 0.2s",borderColor:c.cardBorder}} onMouseEnter={e=>{e.currentTarget.style.borderColor=c.success;e.currentTarget.style.boxShadow=`0 4px 12px rgba(5,150,105,0.08)`;}} onMouseLeave={e=>{e.currentTarget.style.borderColor=c.cardBorder;e.currentTarget.style.boxShadow=c.cardShadow;}}>
+              <div style={{width:36,height:36,borderRadius:8,background:tc?"rgba(5,150,105,0.12)":"rgba(5,150,105,0.06)",display:"flex",alignItems:"center",justifyContent:"center",color:c.success,marginBottom:16}}>
+                <Icon name="target" size={18} color={c.success}/>
               </div>
-              <h3 style={{fontSize:16,fontWeight:600,marginBottom:6,color:c.text}}>Backtest Engine</h3>
-              <p style={{fontSize:13,color:c.textMuted,lineHeight:1.6,margin:0}}>
-                Upload SEC 10-K/10-Q filings. We extract earnout disclosures, run our valuation, and show you the gap against reported fair values.
+              <h3 style={{fontSize:15,fontWeight:600,marginBottom:6,color:c.text,letterSpacing:"-0.2px"}}>Backtest Engine</h3>
+              <p style={{fontSize:13,color:c.textMuted,lineHeight:1.65,margin:0}}>
+                Upload SEC 10-K/10-Q filings. Extract earnout disclosures and validate against reported fair values.
               </p>
-              <div style={{display:"flex",gap:6,marginTop:12}}>
-                <span style={{padding:"3px 8px",borderRadius:100,background:"rgba(34,197,94,0.08)",fontSize:10,color:c.success}}>10-K / 10-Q</span>
-                <span style={{padding:"3px 8px",borderRadius:100,background:"rgba(34,197,94,0.08)",fontSize:10,color:c.success}}>Accuracy Validation</span>
+              <div style={{display:"flex",gap:6,marginTop:14}}>
+                <span style={{padding:"3px 8px",borderRadius:4,background:tc?"rgba(5,150,105,0.08)":"rgba(5,150,105,0.04)",fontSize:10,color:c.success,fontWeight:500}}>10-K / 10-Q</span>
+                <span style={{padding:"3px 8px",borderRadius:4,background:tc?"rgba(5,150,105,0.08)":"rgba(5,150,105,0.04)",fontSize:10,color:c.success,fontWeight:500}}>Validation</span>
               </div>
             </div>
             
-            <div onClick={()=>{setMode("live");setView("live_upload");}} style={{...cardStyle,cursor:"pointer",padding:28,textAlign:"left",transition:"border-color 0.2s"}} onMouseEnter={e=>e.currentTarget.style.borderColor=c.accent} onMouseLeave={e=>e.currentTarget.style.borderColor=c.cardBorder}>
-              <div style={{width:40,height:40,borderRadius:10,background:c.accentGlow,display:"flex",alignItems:"center",justifyContent:"center",color:c.accent,marginBottom:14}}>
-                <Icon name="activity" size={20} color={c.accent}/>
+            <div onClick={()=>{setMode("live");setView("live_upload");}} style={{...cardStyle,cursor:"pointer",padding:30,textAlign:"left",transition:"all 0.2s",borderColor:c.cardBorder}} onMouseEnter={e=>{e.currentTarget.style.borderColor=c.accent;e.currentTarget.style.boxShadow=`0 4px 12px rgba(37,99,235,0.08)`;}} onMouseLeave={e=>{e.currentTarget.style.borderColor=c.cardBorder;e.currentTarget.style.boxShadow=c.cardShadow;}}>
+              <div style={{width:36,height:36,borderRadius:8,background:c.accentLight,display:"flex",alignItems:"center",justifyContent:"center",color:c.accent,marginBottom:16}}>
+                <Icon name="activity" size={18} color={c.accent}/>
               </div>
-              <h3 style={{fontSize:16,fontWeight:600,marginBottom:6,color:c.text}}>Live Valuation</h3>
-              <p style={{fontSize:13,color:c.textMuted,lineHeight:1.6,margin:0}}>
-                Upload your PPA valuation report and latest management forecast. Get the updated fair value with audit-ready deliverables.
+              <h3 style={{fontSize:15,fontWeight:600,marginBottom:6,color:c.text,letterSpacing:"-0.2px"}}>Live Valuation</h3>
+              <p style={{fontSize:13,color:c.textMuted,lineHeight:1.65,margin:0}}>
+                Upload your PPA report and latest forecast. Get the updated fair value with audit-ready deliverables.
               </p>
-              <div style={{display:"flex",gap:6,marginTop:12}}>
-                <span style={{padding:"3px 8px",borderRadius:100,background:c.accentGlow,fontSize:10,color:c.accent}}>PPA Report</span>
-                <span style={{padding:"3px 8px",borderRadius:100,background:c.accentGlow,fontSize:10,color:c.accent}}>Quarterly Update</span>
+              <div style={{display:"flex",gap:6,marginTop:14}}>
+                <span style={{padding:"3px 8px",borderRadius:4,background:c.accentLight,fontSize:10,color:c.accent,fontWeight:500}}>PPA Report</span>
+                <span style={{padding:"3px 8px",borderRadius:4,background:c.accentLight,fontSize:10,color:c.accent,fontWeight:500}}>Quarterly Update</span>
               </div>
             </div>
           </div>
           
-          <div style={{display:"flex",gap:32,justifyContent:"center",marginBottom:24}}>
-            {[{n:"50,000",l:"MC Paths"},{n:"30 min",l:"Not 3 Weeks"},{n:"ASC 820",l:"Compliant"},{n:"Level 3",l:"Audit-Ready"}].map((s,i)=>(
+          <div style={{display:"flex",gap:40,justifyContent:"center",marginBottom:24}}>
+            {[{n:"50,000",l:"MC Paths"},{n:"< 30 min",l:"Turnaround"},{n:"ASC 820",l:"Compliant"},{n:"Level 3",l:"Audit-Ready"}].map((s,i)=>(
               <div key={i} style={{textAlign:"center"}}>
-                <div style={{fontSize:18,fontWeight:700,color:c.accent,fontFamily:"'JetBrains Mono',monospace"}}>{s.n}</div>
-                <div style={{fontSize:11,color:c.textDim}}>{s.l}</div>
+                <div style={{fontSize:16,fontWeight:600,color:c.accent,fontFamily:"'IBM Plex Mono',monospace",letterSpacing:"-0.3px"}}>{s.n}</div>
+                <div style={{fontSize:11,color:c.textDim,marginTop:2,fontWeight:400}}>{s.l}</div>
               </div>
             ))}
           </div>
         </main>
-        <footer style={{padding:"16px 32px",borderTop:`1px solid ${c.cardBorder}`,display:"flex",justifyContent:"space-between",fontSize:11,color:c.textDim}}>
-          <span>ValuProEarnout — Quarterly Earnout Remeasurement Platform</span>
+        <footer style={{padding:"18px 36px",borderTop:`1px solid ${c.cardBorder}`,display:"flex",justifyContent:"space-between",fontSize:11,color:c.textDim}}>
+          <span>ValuProEarnout</span>
           <div style={{display:"flex",gap:6,alignItems:"center"}}><Icon name="shield" size={11} color={c.textDim}/> End-to-end encrypted</div>
         </footer>
       </div>
@@ -895,10 +900,10 @@ export default function ValuProEarnout(){
     ];
     
     return (
-      <div style={{minHeight:"100vh",background:c.bg,fontFamily:"'DM Sans',sans-serif",color:c.text}}>
+      <div style={{minHeight:"100vh",background:c.bg,fontFamily:"'Inter',system-ui,sans-serif",color:c.text}}>
         {fontLink}{header(true)}
         <div style={{maxWidth:640,margin:"48px auto",padding:"0 32px"}}>
-          <h2 style={{fontSize:28,fontWeight:700,marginBottom:6,fontFamily:"'Playfair Display',serif"}}>{isBacktest?"Upload SEC Filing":"Upload Valuation Documents"}</h2>
+          <h2 style={{fontSize:28,fontWeight:700,marginBottom:6,fontFamily:"'Source Serif 4','Georgia',serif"}}>{isBacktest?"Upload SEC Filing":"Upload Valuation Documents"}</h2>
           <p style={{color:c.textMuted,marginBottom:32,fontSize:14}}>{isBacktest?"Upload 10-K or 10-Q filings to extract earnout disclosures and validate ValuPro's engine against reported fair values.":"Upload the initial PPA valuation report and latest forecast to run your quarterly remeasurement."}</p>
           
           {requiredDocs.map((doc,i)=>(
@@ -915,7 +920,7 @@ export default function ValuProEarnout(){
           {files.length>0&&(
             <div style={{marginTop:12}}>
               {files.map((f,i)=>(
-                <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",background:c.accentGlow,borderRadius:8,marginBottom:6}}>
+                <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",background:c.accentLight,borderRadius:8,marginBottom:6}}>
                   <Icon name="file" size={14} color={c.accent}/>
                   <span style={{fontSize:12,flex:1,color:c.text}}>{f.name}</span>
                   <span style={{fontSize:11,color:c.textDim}}>{(f.size/1024).toFixed(1)} KB</span>
@@ -926,8 +931,8 @@ export default function ValuProEarnout(){
           )}
           
           <div style={{display:"flex",gap:12,marginTop:28}}>
-            <button onClick={()=>{setView("landing");setMode(null);setFiles([]);setDocText("");}} style={{padding:"11px 22px",background:"transparent",border:`1px solid ${c.cardBorder}`,borderRadius:10,color:c.text,cursor:"pointer",fontSize:13,fontFamily:"'DM Sans',sans-serif"}}>Back</button>
-            <button onClick={runPipeline} disabled={!docText} style={{flex:1,padding:"11px 22px",background:docText?"linear-gradient(135deg,#6366f1,#8b5cf6)":c.cardBorder,border:"none",borderRadius:10,color:"white",cursor:docText?"pointer":"not-allowed",fontSize:14,fontWeight:600,fontFamily:"'DM Sans',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            <button onClick={()=>{setView("landing");setMode(null);setFiles([]);setDocText("");}} style={{padding:"11px 22px",background:"transparent",border:`1px solid ${c.cardBorder}`,borderRadius:10,color:c.text,cursor:"pointer",fontSize:13,fontFamily:"'Inter',system-ui,sans-serif"}}>Back</button>
+            <button onClick={runPipeline} disabled={!docText} style={{flex:1,padding:"11px 22px",background:docText?"linear-gradient(135deg,#2563eb,#1d4ed8)":c.cardBorder,border:"none",borderRadius:10,color:"white",cursor:docText?"pointer":"not-allowed",fontSize:14,fontWeight:600,fontFamily:"'Inter',system-ui,sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
               <Icon name="brain" size={16} color="white"/>{isBacktest?"Run Backtest":"Run Valuation"}
             </button>
           </div>
@@ -939,14 +944,14 @@ export default function ValuProEarnout(){
   // ---- PROCESSING ----
   if(view==="processing"){
     return (
-      <div style={{minHeight:"100vh",background:c.bg,fontFamily:"'DM Sans',sans-serif",color:c.text}}>
+      <div style={{minHeight:"100vh",background:c.bg,fontFamily:"'Inter',system-ui,sans-serif",color:c.text}}>
         {fontLink}{header(false)}
         <div style={{maxWidth:560,margin:"80px auto",padding:"0 32px",textAlign:"center"}}>
-          <div style={{width:72,height:72,borderRadius:"50%",background:c.accentGlow,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 28px"}}>
+          <div style={{width:72,height:72,borderRadius:"50%",background:c.accentLight,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 28px"}}>
             <div style={{animation:"spin 2s linear infinite"}}><Icon name="refresh" size={28} color={c.accent}/></div>
           </div>
           <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
-          <h2 style={{fontSize:22,fontWeight:700,marginBottom:6,fontFamily:"'Playfair Display',serif"}}>{mode==="backtest"?"Running Backtest":"Processing Valuation"}</h2>
+          <h2 style={{fontSize:22,fontWeight:700,marginBottom:6,fontFamily:"'Source Serif 4','Georgia',serif"}}>{mode==="backtest"?"Running Backtest":"Processing Valuation"}</h2>
           <p style={{fontSize:14,color:c.accent,marginBottom:28,fontWeight:500}}>{stage}</p>
           <div style={{width:"100%",height:5,background:c.cardBorder,borderRadius:100,overflow:"hidden",marginBottom:36}}>
             <div style={{width:`${progress}%`,height:"100%",background:"linear-gradient(90deg,#6366f1,#a78bfa)",borderRadius:100,transition:"width 0.5s ease"}} />
@@ -974,20 +979,20 @@ export default function ValuProEarnout(){
   // ---- RESULTS ----
   if(view==="results"&&results){
     return (
-      <div style={{minHeight:"100vh",background:c.bg,fontFamily:"'DM Sans',sans-serif",color:c.text}}>
+      <div style={{minHeight:"100vh",background:c.bg,fontFamily:"'Inter',system-ui,sans-serif",color:c.text}}>
         {fontLink}{header(true)}
         <div style={{padding:"28px 32px",maxWidth:1300,margin:"0 auto"}}>
           {/* Header */}
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24}}>
             <div>
-              <h2 style={{fontSize:24,fontWeight:700,marginBottom:4,fontFamily:"'Playfair Display',serif"}}>{mode==="backtest"?"Backtest Results":"Earnout Remeasurement"}</h2>
+              <h2 style={{fontSize:24,fontWeight:700,marginBottom:4,fontFamily:"'Source Serif 4','Georgia',serif"}}>{mode==="backtest"?"Backtest Results":"Earnout Remeasurement"}</h2>
               <p style={{fontSize:13,color:c.textMuted}}>{params.metric} • {new Date().toLocaleDateString("en-US",{year:"numeric",month:"long",day:"numeric"})}</p>
             </div>
             <div style={{display:"flex",gap:8}}>
-              <button onClick={()=>generateExcel(params,results,sensitivities)} style={{padding:"9px 16px",background:"transparent",border:`1px solid ${c.cardBorder}`,borderRadius:8,color:c.text,cursor:"pointer",fontSize:12,fontFamily:"'DM Sans',sans-serif",display:"flex",alignItems:"center",gap:6}}><Icon name="download" size={14}/>Excel</button>
-              <button onClick={()=>generateMemo(params,results,sensitivities,"pdf")} style={{padding:"9px 16px",background:"transparent",border:`1px solid ${c.cardBorder}`,borderRadius:8,color:c.text,cursor:"pointer",fontSize:12,fontFamily:"'DM Sans',sans-serif",display:"flex",alignItems:"center",gap:6}}><Icon name="file" size={14}/>PDF Memo</button>
-              <button onClick={()=>generateMemo(params,results,sensitivities,"docx")} style={{padding:"9px 16px",background:"transparent",border:`1px solid ${c.cardBorder}`,borderRadius:8,color:c.text,cursor:"pointer",fontSize:12,fontFamily:"'DM Sans',sans-serif",display:"flex",alignItems:"center",gap:6}}><Icon name="file" size={14}/>Word Memo</button>
-              <button onClick={()=>{setView("landing");setResults(null);setSensitivities(null);setExtractedData(null);setDocText("");setFiles([]);setBacktestComparison(null);setMode(null);}} style={{padding:"9px 16px",background:"transparent",border:`1px solid ${c.cardBorder}`,borderRadius:8,color:c.text,cursor:"pointer",fontSize:12,fontFamily:"'DM Sans',sans-serif",display:"flex",alignItems:"center",gap:6}}><Icon name="plus" size={14}/>New</button>
+              <button onClick={()=>generateExcel(params,results,sensitivities)} style={{padding:"9px 16px",background:"transparent",border:`1px solid ${c.cardBorder}`,borderRadius:8,color:c.text,cursor:"pointer",fontSize:12,fontFamily:"'Inter',system-ui,sans-serif",display:"flex",alignItems:"center",gap:6}}><Icon name="download" size={14}/>Excel</button>
+              <button onClick={()=>generateMemo(params,results,sensitivities,"pdf")} style={{padding:"9px 16px",background:"transparent",border:`1px solid ${c.cardBorder}`,borderRadius:8,color:c.text,cursor:"pointer",fontSize:12,fontFamily:"'Inter',system-ui,sans-serif",display:"flex",alignItems:"center",gap:6}}><Icon name="file" size={14}/>PDF Memo</button>
+              <button onClick={()=>generateMemo(params,results,sensitivities,"docx")} style={{padding:"9px 16px",background:"transparent",border:`1px solid ${c.cardBorder}`,borderRadius:8,color:c.text,cursor:"pointer",fontSize:12,fontFamily:"'Inter',system-ui,sans-serif",display:"flex",alignItems:"center",gap:6}}><Icon name="file" size={14}/>Word Memo</button>
+              <button onClick={()=>{setView("landing");setResults(null);setSensitivities(null);setExtractedData(null);setDocText("");setFiles([]);setBacktestComparison(null);setMode(null);}} style={{padding:"9px 16px",background:"transparent",border:`1px solid ${c.cardBorder}`,borderRadius:8,color:c.text,cursor:"pointer",fontSize:12,fontFamily:"'Inter',system-ui,sans-serif",display:"flex",alignItems:"center",gap:6}}><Icon name="plus" size={14}/>New</button>
             </div>
           </div>
 
@@ -1005,9 +1010,9 @@ export default function ValuProEarnout(){
                   </div>
                 </div>
                 <div style={{display:"flex",gap:20,fontSize:12}}>
-                  <div style={{textAlign:"center"}}><div style={{fontSize:18,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",color:c.textMuted}}>{fmt(backtestComparison.reported)}</div><div style={{color:c.textDim}}>Reported</div></div>
-                  <div style={{textAlign:"center"}}><div style={{fontSize:18,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",color:c.accent}}>{fmt(backtestComparison.computed)}</div><div style={{color:c.textDim}}>ValuPro</div></div>
-                  <div style={{textAlign:"center"}}><div style={{fontSize:18,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",color:backtestComparison.gap<5?c.success:c.warning}}>{backtestComparison.gap.toFixed(1)}%</div><div style={{color:c.textDim}}>Gap</div></div>
+                  <div style={{textAlign:"center"}}><div style={{fontSize:18,fontWeight:700,fontFamily:"'IBM Plex Mono',monospace",color:c.textMuted}}>{fmt(backtestComparison.reported)}</div><div style={{color:c.textDim}}>Reported</div></div>
+                  <div style={{textAlign:"center"}}><div style={{fontSize:18,fontWeight:700,fontFamily:"'IBM Plex Mono',monospace",color:c.accent}}>{fmt(backtestComparison.computed)}</div><div style={{color:c.textDim}}>ValuPro</div></div>
+                  <div style={{textAlign:"center"}}><div style={{fontSize:18,fontWeight:700,fontFamily:"'IBM Plex Mono',monospace",color:backtestComparison.gap<5?c.success:c.warning}}>{backtestComparison.gap.toFixed(1)}%</div><div style={{color:c.textDim}}>Gap</div></div>
                 </div>
               </div>
             </div>
@@ -1048,7 +1053,7 @@ export default function ValuProEarnout(){
                 <ParamSlider theme={theme} label="Participation Rate" value={params.participationRate} onChange={v=>setParams(p=>({...p,participationRate:v}))} min={0.05} max={1.0} step={0.05} format="percent"/>
                 <ParamSlider theme={theme} label="Cap" value={params.cap||0} onChange={v=>setParams(p=>({...p,cap:v||null}))} min={0} max={20e6} step={500000} format="currency" tooltip="Maximum earnout payout"/>
                 
-                <button onClick={()=>runValuation(params)} style={{width:"100%",padding:"10px",background:"linear-gradient(135deg,#6366f1,#8b5cf6)",border:"none",borderRadius:8,color:"white",cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:"'DM Sans',sans-serif",marginTop:6,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                <button onClick={()=>runValuation(params)} style={{width:"100%",padding:"10px",background:"linear-gradient(135deg,#2563eb,#1d4ed8)",border:"none",borderRadius:8,color:"white",cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:"'Inter',system-ui,sans-serif",marginTop:6,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
                   <Icon name="refresh" size={14} color="white"/> Recalculate
                 </button>
               </div>
@@ -1070,7 +1075,7 @@ export default function ValuProEarnout(){
                       <Icon name={kpi.icon} size={13} color={kpi.color}/>
                       <span style={{fontSize:10,color:c.textMuted}}>{kpi.label}</span>
                     </div>
-                    <div style={{fontSize:20,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",color:kpi.color}}>
+                    <div style={{fontSize:20,fontWeight:700,fontFamily:"'IBM Plex Mono',monospace",color:kpi.color}}>
                       {kpi.display||<AnimatedValue value={kpi.value}/>}
                     </div>
                   </div>
@@ -1085,7 +1090,7 @@ export default function ValuProEarnout(){
                     <span style={{fontSize:10,color:c.textDim,fontWeight:400,marginLeft:"auto"}}>{MC_PATHS.toLocaleString()} paths</span>
                   </h3>
                   <Histogram data={results.histogram} fairValue={results.fairValue} theme={theme}/>
-                  <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:10,fontFamily:"'JetBrains Mono',monospace",color:c.textDim}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:10,fontFamily:"'IBM Plex Mono',monospace",color:c.textDim}}>
                     <span>{fmt(results.histogram[0]?.x)}</span>
                     <span style={{color:c.warning}}>FV: {fmt(results.fairValue)}</span>
                     <span>{fmt(results.histogram[results.histogram.length-1]?.x)}</span>
@@ -1114,7 +1119,7 @@ export default function ValuProEarnout(){
                         <div style={{height:60,display:"flex",alignItems:"flex-end",justifyContent:"center",marginBottom:4}}>
                           <div style={{width:"100%",maxWidth:36,height:`${Math.min(100,(val/(results.percentiles.p95||1))*100)}%`,background:`linear-gradient(180deg,${c.accent},rgba(99,102,241,0.3))`,borderRadius:"4px 4px 0 0",minHeight:4}}/>
                         </div>
-                        <div style={{fontSize:11,fontFamily:"'JetBrains Mono',monospace",color:c.text}}>{fmt(val)}</div>
+                        <div style={{fontSize:11,fontFamily:"'IBM Plex Mono',monospace",color:c.text}}>{fmt(val)}</div>
                       </div>
                     );
                   })}
@@ -1141,5 +1146,5 @@ export default function ValuProEarnout(){
     );
   }
 
-  return <div style={{minHeight:"100vh",background:c.bg,fontFamily:"'DM Sans',sans-serif",color:c.text}}>{fontLink}{header()}<div style={{padding:40,textAlign:"center",color:c.textMuted}}>Loading...</div></div>;
+  return <div style={{minHeight:"100vh",background:c.bg,fontFamily:"'Inter',system-ui,sans-serif",color:c.text}}>{fontLink}{header()}<div style={{padding:40,textAlign:"center",color:c.textMuted}}>Loading...</div></div>;
 }
