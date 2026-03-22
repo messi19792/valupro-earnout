@@ -452,7 +452,7 @@ const verifyExtraction = async (text, extracted) => {
 // EXCEL GENERATION — Professionally formatted with xlsx-js-style
 // ============================================================
 const generateExcel = async (params, results, sensitivities) => {
-  let XLSX; try { XLSX = await import("xlsx-js-style"); } catch(e) { XLSX = await import("xlsx"); }
+  const XLSX = await import("xlsx-js-style");
   const wb = XLSX.utils.book_new();
   const periods = params.periods || [];
   const nP = periods.length;
@@ -1288,7 +1288,7 @@ ${r.missingInfo ? `<div class="missing"><strong>To strengthen:</strong> ${r.miss
   // Export audit responses as Excel
   const exportAuditExcel = async () => {
     if (!auditResponses) return;
-    let XLSX; try { XLSX = await import("xlsx-js-style"); } catch(e) { XLSX = await import("xlsx"); }
+    const XLSX = await import("xlsx-js-style");
     const wb = XLSX.utils.book_new();
     const fontH = { name: "Aptos", sz: 10, bold: true, color: { rgb: "FFFFFF" } };
     const fillH = { fgColor: { rgb: "1F3864" } };
