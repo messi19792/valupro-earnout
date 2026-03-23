@@ -1724,6 +1724,26 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
             )}
           </div>
 
+          {/* Full redacted document viewer */}
+          <div style={{ ...cardStyle, marginBottom: 14 }}>
+            <div className="vf" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}><Icon name="file" size={13} color={c.accent} /> Full Redacted Document</div>
+              <span style={{ fontSize: 9, color: c.textMuted }}>This is exactly what will be sent for extraction — scroll to verify</span>
+            </div>
+            <div style={{ maxHeight: 400, overflow: "auto", padding: "12px 14px", background: tc ? "#0c1222" : "#fcfcfd", border: `1px solid ${c.cardBorder}`, borderRadius: 6, fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1.7, color: c.text, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+              {r.redactedText.split(/(\[[A-Z_]+(?:_[A-Z0-9]+)?\])/g).map((part, i) => {
+                if (/^\[[A-Z_]+(?:_[A-Z0-9]+)?\]$/.test(part)) {
+                  return <span key={i} style={{ background: "rgba(5,150,105,0.12)", color: c.success, padding: "1px 3px", borderRadius: 2, fontWeight: 600 }}>{part}</span>;
+                }
+                return <span key={i}>{part}</span>;
+              })}
+            </div>
+            <div className="vf" style={{ justifyContent: "space-between", marginTop: 6 }}>
+              <span style={{ fontSize: 9, color: c.success, display: "flex", alignItems: "center", gap: 3 }}><Icon name="check" size={9} color={c.success} /> Green highlights = redacted terms (placeholders)</span>
+              <span style={{ fontSize: 9, color: c.textDim }}>All other text is preserved for extraction</span>
+            </div>
+          </div>
+
           {/* Action buttons */}
           <div className="vf r-col" style={{ gap: 10 }}>
             <button onClick={() => { setView(mode === "backtest" ? "backtest_upload" : "live_upload"); setRedactionResult(null); }} style={{ padding: "10px 20px", background: "transparent", border: `1px solid ${c.cardBorder}`, borderRadius: 8, color: c.text, cursor: "pointer", fontSize: 12 }}>Back</button>
