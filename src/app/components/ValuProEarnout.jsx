@@ -1715,6 +1715,7 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
                 ))}
               </div>
             )}
+          </div>
 
           {/* Custom redactions */}
           <div style={{ ...cardStyle, marginBottom: 14, padding: 14 }}>
