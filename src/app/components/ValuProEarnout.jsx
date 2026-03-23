@@ -9,6 +9,154 @@ const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 const MC_PATHS = 50000;
 
 // ============================================================
+// BROWSER-SIDE REDACTION ENGINE
+// Runs entirely in the user's browser. No server calls.
+// ============================================================
+const REDACTION_PATTERNS = {
+  partyDef: /([A-Z][A-Za-z\s&.,'''-]+(?:Inc\.|Corp\.|LLC|LP|LLP|Ltd\.|Limited|Company|Co\.|Holdings|Group|Partners|Capital|Fund|Trust|AG|GmbH|S\.A\.|PJSC|FZE|FZCO))\s*[,]?\s*(?:a\s+[A-Za-z\s]+(?:corporation|company|limited liability|partnership|entity))?\s*\(?(?:the\s+)?['""]([A-Za-z\s]+)['""]?\)?/gi,
+  entitySuffix: /\b([A-Z][A-Za-z\s&'''-]{2,40})\s+(Inc\.|Corp\.|LLC|LP|LLP|Ltd\.|Limited|Company|Co\.|Holdings|Group|Partners|Capital|Fund|Trust|AG|GmbH|S\.A\.|PJSC|FZE|FZCO)\b/g,
+  projectName: /(?:Project|Operation|Code\s?name|Deal)\s+["'"]?([A-Z][A-Za-z]+)["'"]?/gi,
+  fullDate: /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\b|\b\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b|\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/gi,
+  purchasePrice: /(?:aggregate\s+)?(?:purchase\s+price|total\s+consideration|base\s+consideration|closing\s+(?:consideration|payment))\s+(?:of|equal\s+to|in\s+the\s+amount\s+of)\s+\$[\d,]+(?:\.\d+)?(?:\s*(?:million|billion|M|B))?/gi,
+  address: /\d+\s+[A-Z][A-Za-z\s]+(?:Street|St\.|Avenue|Ave\.|Boulevard|Blvd\.|Road|Rd\.|Drive|Dr\.|Suite|Ste\.)[,\s]+(?:[A-Z][A-Za-z\s]+,\s*)?(?:[A-Z]{2})\s+\d{5}/g,
+  email: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
+  namedPerson: /(?:Mr\.|Ms\.|Mrs\.|Dr\.)\s+[A-Z][a-z]+\s+(?:[A-Z]\.?\s+)?[A-Z][a-z]+/g,
+  titledPerson: /(?:Chief\s+(?:Executive|Financial|Operating)\s+Officer|CEO|CFO|COO|President|Chairman|Managing\s+Director)\s*[,:]?\s*([A-Z][a-z]+\s+[A-Z][a-z]+)/gi,
+};
+
+const PRESERVE_TERMS = /(?:earnout|earn-out|contingent\s+consideration|EBITDA|Revenue|Net\s+Income|threshold|cap|floor|catch-?up|claw-?back|acceleration|measurement\s+period|notional|fixed\s+rate|floating\s+rate|SOFR|LIBOR|swap|coupon|maturity|par\s+value|yield|spread|Level\s+[123]|ASC\s+820|IFRS\s+13|Monte\s+Carlo|volatility|discount\s+rate|risk-?free|fair\s+value)/i;
+
+const redactDocument = (text, level = "standard") => {
+  const redactions = [];
+  let result = text;
+  const entityMap = new Map();
+  let cc = { co: 0, person: 0 };
+
+  const placeholder = (name, type) => {
+    const k = name.trim().toLowerCase();
+    if (entityMap.has(k)) return entityMap.get(k);
+    cc[type] = (cc[type] || 0) + 1;
+    const labels = { co: ["[Company_A]","[Company_B]","[Company_C]","[Company_D]","[Company_E]"], person: ["[Person_1]","[Person_2]","[Person_3]","[Person_4]"] };
+    const ph = (labels[type] || ["[REDACTED]"])[cc[type] - 1] || `[${type}_${cc[type]}]`;
+    entityMap.set(k, ph);
+    return ph;
+  };
+
+  // Step 1: Party definitions
+  const partyMatches = [...text.matchAll(REDACTION_PATTERNS.partyDef)];
+  for (const m of partyMatches) {
+    const fullName = m[1].trim(), role = m[2]?.trim();
+    const ph = role ? `[${role.replace(/\s+/g, "_")}]` : placeholder(fullName, "co");
+    entityMap.set(fullName.toLowerCase(), ph);
+    const short = fullName.replace(/\s+(Inc\.|Corp\.|LLC|LP|LLP|Ltd\.|Limited|Company|Co\.)$/i, "").trim();
+    if (short !== fullName) entityMap.set(short.toLowerCase(), ph);
+    redactions.push({ original: fullName, replacement: ph, type: "party", confidence: 95 });
+  }
+
+  // Step 2: Entity suffixes
+  const entMatches = [...text.matchAll(REDACTION_PATTERNS.entitySuffix)];
+  for (const m of entMatches) {
+    const fn = m[0].trim();
+    if (!entityMap.has(fn.toLowerCase())) {
+      const ph = placeholder(fn, "co");
+      redactions.push({ original: fn, replacement: ph, type: "entity", confidence: 85 });
+    }
+  }
+
+  // Apply entity replacements (longest first)
+  const sorted = [...entityMap.entries()].sort((a, b) => b[0].length - a[0].length);
+  for (const [real, ph] of sorted) {
+    const esc = real.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    result = result.replace(new RegExp(`\\b${esc}\\b`, "gi"), ph);
+  }
+
+  if (level === "standard" || level === "maximum") {
+    // Step 3: Project names
+    result = result.replace(REDACTION_PATTERNS.projectName, (m) => { redactions.push({ original: m, replacement: "Project [REDACTED]", type: "code", confidence: 90 }); return "Project [REDACTED]"; });
+
+    // Step 4: Dates (preserve financial-context dates)
+    result = result.replace(REDACTION_PATTERNS.fullDate, (m, o) => {
+      const ctx = result.substring(Math.max(0, result.indexOf(m) - 60), Math.min(result.length, result.indexOf(m) + m.length + 60));
+      if (/measurement|fiscal|FY\d|earnout|maturity|effective|termination|payment/i.test(ctx)) return m;
+      redactions.push({ original: m, replacement: "[DATE]", type: "date", confidence: 80 });
+      return "[DATE]";
+    });
+
+    // Step 5: Purchase price
+    result = result.replace(REDACTION_PATTERNS.purchasePrice, (m) => { redactions.push({ original: m, replacement: "[PURCHASE_PRICE]", type: "price", confidence: 90 }); return "[PURCHASE_PRICE]"; });
+
+    // Step 6: Addresses
+    result = result.replace(REDACTION_PATTERNS.address, (m) => { redactions.push({ original: m, replacement: "[ADDRESS]", type: "address", confidence: 85 }); return "[ADDRESS]"; });
+
+    // Step 7: People
+    result = result.replace(REDACTION_PATTERNS.namedPerson, (m) => { const ph = placeholder(m, "person"); redactions.push({ original: m, replacement: ph, type: "person", confidence: 85 }); return ph; });
+    result = result.replace(REDACTION_PATTERNS.titledPerson, (m, name) => { const ph = placeholder(name, "person"); redactions.push({ original: name, replacement: ph, type: "person", confidence: 80 }); return m.replace(name, ph); });
+
+    // Step 8: Emails
+    result = result.replace(REDACTION_PATTERNS.email, (m) => { redactions.push({ original: m, replacement: "[EMAIL]", type: "email", confidence: 95 }); return "[EMAIL]"; });
+  }
+
+  // Detect document type
+  const docType = /isda|swap|notional/i.test(text) ? "swap" : /indenture|coupon|bondholder/i.test(text) ? "bond" : /credit agreement|term loan/i.test(text) ? "credit" : /earnout|contingent consideration|purchase price allocation/i.test(text) ? "earnout" : /10-K|10-Q|securities and exchange/i.test(text) ? "sec_filing" : "unknown";
+
+  return { redactedText: result, redactions, entityMap: Object.fromEntries(entityMap), stats: { total: redactions.length, byType: redactions.reduce((a, r) => ({ ...a, [r.type]: (a[r.type] || 0) + 1 }), {}), avgConfidence: redactions.length ? Math.round(redactions.reduce((s, r) => s + r.confidence, 0) / redactions.length) : 100 }, docType };
+};
+
+// GT Sample Document (simulates a real PPA report for demo purposes)
+const GT_SAMPLE_DOC = `CONFIDENTIAL — VALUATION MEMORANDUM
+
+Prepared by: Meridian Valuation Partners LLC
+123 Wall Street, Suite 4500, New York, NY 10005
+
+Date: January 15, 2019
+
+Re: Purchase Price Allocation — Acquisition of Greenfield Technologies Inc. by Apex Industrial Holdings Corp.
+
+1. ENGAGEMENT OVERVIEW
+
+On December 31, 2018, Apex Industrial Holdings Corp., a Delaware corporation (the "Acquirer"), completed the acquisition of 100% of the issued and outstanding equity interests of Greenfield Technologies Inc., a California corporation (the "Target" or the "Company"), pursuant to the Agreement and Plan of Merger dated October 15, 2018 (the "Merger Agreement"), for aggregate consideration of $180 million (the "Purchase Price").
+
+The transaction was overseen by CEO Mr. James Richardson of Apex Industrial and CFO Dr. Sarah Chen of Greenfield Technologies. Legal counsel was provided by Sullivan & Partners LLP (for the Acquirer) and Morrison & Blake LLP (for the Target).
+
+Contact: deal-team@meridianvaluation.com
+
+2. CONTINGENT CONSIDERATION (EARNOUT)
+
+Per Section 2.7 of the Merger Agreement, the Acquirer is obligated to make contingent payments to the former shareholders of the Target based on the achievement of annual Adjusted EBITDA targets for fiscal years FY2019, FY2020, and FY2021. The key terms are:
+
+Metric: Adjusted EBITDA as defined in Section 2.4 of the Merger Agreement
+Structure: Binary — a fixed payment of $5,000,000 is made in any year the Target meets or exceeds the forecasted Adjusted EBITDA for that measurement period
+Maximum total earnout: $15,000,000 ($5,000,000 × 3 years)
+Payment timing: 120 days following the end of each measurement period
+Escrow: Funds for potential earnout payment are NOT held in escrow and are subject to the Acquirer's credit risk
+
+Management Projections:
+- FY2019 projected Adjusted EBITDA: $14,000,000
+- FY2020 projected Adjusted EBITDA: $15,500,000
+- FY2021 projected Adjusted EBITDA: $17,000,000
+
+Current (FY2018) Adjusted EBITDA: $12,000,000
+
+3. VALUATION METHODOLOGY
+
+The earnout is classified as a nonlinear/dependent structure because each year's payment is binary (threshold must be met). We applied a Monte Carlo simulation using 50,000 paths under the risk-neutral framework, consistent with the Appraisal Foundation's Valuation Advisory 4: Valuation of Contingent Consideration (VFR 4).
+
+Key Assumptions:
+- EBITDA discount rate: 10.0%
+- Risk-adjusted discount rate: 4.5%
+- EBITDA volatility: 40.0%, derived from the 2-year historical equity volatility of comparable companies:
+  * Acme Manufacturing Corp (ACME): 38.2%
+  * Beta Dynamics Inc (BETA): 42.1%
+  * Gamma Industrial Holdings (GAMA): 39.5%
+  Median equity volatility of 39.5% was de-levered using the Hamada equation and re-levered at the Target's capital structure.
+- Risk-free rate: 2.5% (interpolated U.S. Treasury yield)
+- Credit risk adjustment: 2.0% (reflecting Acquirer's non-investment-grade credit profile)
+
+4. FAIR VALUE HIERARCHY
+
+The earnout liability is classified as Level 3 within the fair value hierarchy defined by ASC 820.`;
+
+// ============================================================
 // MATH PRIMITIVES
 // ============================================================
 const normalRandom = () => {
@@ -979,6 +1127,11 @@ export default function ValuProEarnout() {
   const [progress, setProgress] = useState(0);
   const [stage, setStage] = useState("");
 
+  // Redaction
+  const [redactionResult, setRedactionResult] = useState(null);
+  const [redactionLevel, setRedactionLevel] = useState("standard");
+  const [customRedactions, setCustomRedactions] = useState("");
+
   // Multi-period earnout params
   const [params, setParams] = useState({
     metric: "Adjusted EBITDA",
@@ -1124,62 +1277,52 @@ export default function ValuProEarnout() {
   // ---- GRANT THORNTON DEMO ----
   const runGTDemo = () => {
     setMode("backtest");
-    setView("processing"); setProgress(0);
-    const gtParams = {
-      metric: "Adjusted EBITDA",
-      currentMetric: 12e6, // FY18 base EBITDA ~$12M
-      metricGrowthRate: 0.12, // Implied by management projections ($12M → $17M over 3 yrs ≈ 12% CAGR)
-      volatility: 0.40, // GT stated: 40% EBITDA volatility
-      discountRate: 0.10, // GT stated: 10% EBITDA discount rate (metric risk premium)
-      riskFreeRate: 0.025, // ~2018 UST rate
-      creditAdj: 0.02, // Implied credit spread (risk-adjusted rate 4.5% = riskFree 2.5% + credit 2%)
-      payoffDiscountRate: 0.045, // GT stated: 4.5% risk-adjusted discount rate for payoffs
-      isEscrowed: false,
-      periods: [
-        { year: 1, yearFromNow: 1, structure: "binary", threshold: 14e6, participationRate: 0, fixedPayment: 5e6, cap: 5e6, floor: 0, projectedMetric: 14e6, tiers: null },
-        { year: 2, yearFromNow: 2, structure: "binary", threshold: 15.5e6, participationRate: 0, fixedPayment: 5e6, cap: 5e6, floor: 0, projectedMetric: 15.5e6, tiers: null },
-        { year: 3, yearFromNow: 3, structure: "binary", threshold: 17e6, participationRate: 0, fixedPayment: 5e6, cap: 5e6, floor: 0, projectedMetric: 17e6, tiers: null },
-      ],
-      hasCatchUp: false, hasCumulativeTarget: false, cumulativeTarget: 0,
-      hasMultiYearCap: true, multiYearCap: 15e6, hasCarryForward: false,
-      hasClawback: false, clawbackThreshold: 0, clawbackRate: 0, clawbackCap: 0,
-      hasAcceleration: false, accelerationProb: 0, accelerationTreatment: "max", accelerationPercentile: 75,
-      isMultiMetric: false, secondMetric: null, metricCorrelation: 0.5,
-      paymentDelay: 90,
-    };
-
-    // Simulate the processing stages quickly (no API call needed)
-    const stages = [
-      { s: "Loading Grant Thornton example...", p: 15, d: 300 },
-      { s: "Terms pre-loaded: 3-year binary earnout, $5M/year", p: 35, d: 400 },
-      { s: "Assumptions: 40% vol, 10% discount (per GT)", p: 55, d: 350 },
-      { s: "Ready for review...", p: 100, d: 300 },
-    ];
-
-    let delay = 0;
-    stages.forEach(({ s, p, d }) => {
-      delay += d;
-      setTimeout(() => { setStage(s); setProgress(p); }, delay);
-    });
-
-    setTimeout(() => {
-      setParams(gtParams);
-      setBacktestComparison({ reported: null, computed: null, gap: null, isDemo: true, scenarioBasedValue: 9.1e6 });
-      setVerification({ verified: true, overallConfidence: 100, recommendation: "proceed", errors: [], missingTerms: [] });
-      // Set GT provenance for demo
-      setProvenance({
-        volatility: { methodology: "2-year historical equity volatility of comparable public companies, de-levered using Hamada equation and re-levered at subject company capital structure.", comparableCompanies: [{ name: "Comparable A", ticker: "COMPA", volatility: 0.38 }, { name: "Comparable B", ticker: "COMPB", volatility: 0.42 }, { name: "Comparable C", ticker: "COMPC", volatility: 0.40 }], deLeveringMethod: "Hamada equation", sourceLocation: "Grant Thornton article, April 2021" },
-        discountRate: { methodology: "EBITDA discount rate reflecting required return for EBITDA cash flows, consistent with WACC.", components: { riskFreeRate: 0.025, equityRiskPremium: 0.055, sizePremium: 0.02 }, sourceLocation: "GT article assumptions" },
-        projections: { source: "Management forecast at acquisition date", forecastDate: "December 31, 2018", provider: "TargetCo management", sourceLocation: "GT article example terms" },
-        creditRisk: { methodology: "Implied from risk-adjusted discount rate of 4.5% less risk-free rate of 2.5%", acquirerRating: "Not stated — implied investment-grade" },
-        referencedDocuments: ["Grant Thornton 'Earnout values: Scenario-based forecast vs. simulation', April 2021", "Appraisal Foundation VFR 4: Valuation of Contingent Consideration, February 2019"],
-        methodologyQuote: "The authoritative VFR 4 recommends the option-pricing methodologies, including a Monte Carlo simulation, in the valuation of revenue and earnings earnouts.",
-      });
-      setView("review");
-    }, delay + 300);
+    setBacktestComparison({ reported: null, computed: null, gap: null, isDemo: true, scenarioBasedValue: 9.1e6 });
+    // Load the GT sample document and run redaction on it
+    setDocText(GT_SAMPLE_DOC);
+    const res = redactDocument(GT_SAMPLE_DOC, "standard");
+    setRedactionResult(res);
+    setView("redaction_preview");
   };
 
-  const resetAll = () => { setView("landing"); setResults(null); setSensitivities(null); setExtractedData(null); setDocText(""); setFiles([]); setBacktestComparison(null); setMode(null); setAuditQuestions(null); setAuditResponses(null); setProvenance({ volatility: { methodology: null, comparableCompanies: [], deLeveringMethod: null, sourceLocation: null, userNote: "" }, discountRate: { methodology: null, components: null, sourceLocation: null, userNote: "" }, projections: { source: null, forecastDate: null, provider: null, sourceLocation: null, userNote: "" }, creditRisk: { methodology: null, acquirerRating: null, userNote: "" }, referencedDocuments: [], methodologyQuote: null }); };
+  const resetAll = () => { setView("landing"); setResults(null); setSensitivities(null); setExtractedData(null); setDocText(""); setFiles([]); setBacktestComparison(null); setMode(null); setAuditQuestions(null); setAuditResponses(null); setRedactionResult(null); setCustomRedactions(""); setProvenance({ volatility: { methodology: null, comparableCompanies: [], deLeveringMethod: null, sourceLocation: null, userNote: "" }, discountRate: { methodology: null, components: null, sourceLocation: null, userNote: "" }, projections: { source: null, forecastDate: null, provider: null, sourceLocation: null, userNote: "" }, creditRisk: { methodology: null, acquirerRating: null, userNote: "" }, referencedDocuments: [], methodologyQuote: null }); };
+
+  // After user confirms redaction, proceed to extraction (live/backtest) or directly to review (GT)
+  const proceedFromRedaction = () => {
+    const isGT = backtestComparison?.isDemo;
+    if (isGT) {
+      // GT demo: skip API extraction, go straight to review with hardcoded params
+      const gtParams = {
+        metric: "Adjusted EBITDA", currentMetric: 12e6, metricGrowthRate: 0.12, volatility: 0.40,
+        discountRate: 0.10, riskFreeRate: 0.025, creditAdj: 0.02, payoffDiscountRate: 0.045, isEscrowed: false,
+        periods: [
+          { year: 1, yearFromNow: 1, structure: "binary", threshold: 14e6, participationRate: 0, fixedPayment: 5e6, cap: 5e6, floor: 0, projectedMetric: 14e6, tiers: null },
+          { year: 2, yearFromNow: 2, structure: "binary", threshold: 15.5e6, participationRate: 0, fixedPayment: 5e6, cap: 5e6, floor: 0, projectedMetric: 15.5e6, tiers: null },
+          { year: 3, yearFromNow: 3, structure: "binary", threshold: 17e6, participationRate: 0, fixedPayment: 5e6, cap: 5e6, floor: 0, projectedMetric: 17e6, tiers: null },
+        ],
+        hasCatchUp: false, hasCumulativeTarget: false, cumulativeTarget: 0, hasMultiYearCap: true, multiYearCap: 15e6,
+        hasCarryForward: false, hasClawback: false, clawbackThreshold: 0, clawbackRate: 0, clawbackCap: 0,
+        hasAcceleration: false, accelerationProb: 0, accelerationTreatment: "max", accelerationPercentile: 75,
+        isMultiMetric: false, secondMetric: null, metricCorrelation: 0.5, paymentDelay: 90,
+      };
+      setParams(gtParams);
+      setVerification({ verified: true, overallConfidence: 100, recommendation: "proceed", errors: [], missingTerms: [] });
+      setProvenance({
+        volatility: { methodology: "2-year historical equity volatility, de-levered using Hamada equation.", comparableCompanies: [{ name: "Acme Manufacturing Corp", ticker: "ACME", volatility: 0.382 }, { name: "Beta Dynamics Inc", ticker: "BETA", volatility: 0.421 }, { name: "Gamma Industrial Holdings", ticker: "GAMA", volatility: 0.395 }], deLeveringMethod: "Hamada equation", sourceLocation: "PPA Report Section 3" },
+        discountRate: { methodology: "WACC-based, consistent with business enterprise valuation.", components: { riskFreeRate: 0.025, equityRiskPremium: 0.055, sizePremium: 0.02 }, sourceLocation: "PPA Report Section 3" },
+        projections: { source: "Management forecast at acquisition date", forecastDate: "December 31, 2018", provider: "Target management", sourceLocation: "PPA Report Section 2" },
+        creditRisk: { methodology: "Based on acquirer credit profile", acquirerRating: "Non-investment-grade" },
+        referencedDocuments: ["Merger Agreement Section 2.4", "Merger Agreement Section 2.7", "VFR 4"],
+        methodologyQuote: "Monte Carlo simulation using 50,000 paths under the risk-neutral framework, consistent with VFR 4.",
+      });
+      setView("review");
+    } else {
+      // Live/backtest: use redacted text for extraction
+      const textForExtraction = redactionResult?.redactedText || docText;
+      setDocText(textForExtraction); // Replace original with redacted
+      runPipeline();
+    }
+  };
 
   // Run valuation after user confirms extracted terms on review screen
   const runFromReview = () => {
@@ -1448,8 +1591,144 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
 
           <div className="vf r-col" style={{ gap: 10, marginTop: isBT ? 0 : 24 }}>
             <button onClick={() => { setView("landing"); setMode(null); setFiles([]); setDocText(""); }} style={{ padding: "10px 20px", background: "transparent", border: `1px solid ${c.cardBorder}`, borderRadius: 8, color: c.text, cursor: "pointer", fontSize: 12 }}>Back</button>
-            <button onClick={runPipeline} disabled={!docText} style={{ flex: 1, padding: "10px 20px", background: docText ? "linear-gradient(135deg,#2563eb,#1d4ed8)" : c.cardBorder, border: "none", borderRadius: 8, color: "white", cursor: docText ? "pointer" : "not-allowed", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-              <Icon name="brain" size={15} color="white" />{isBT ? "Run Backtest" : "Run Valuation"}
+            <button onClick={() => {
+              // Run redaction on the uploaded text
+              const res = redactDocument(docText, redactionLevel);
+              setRedactionResult(res);
+              setView("redaction_preview");
+            }} disabled={!docText} style={{ flex: 1, padding: "10px 20px", background: docText ? "linear-gradient(135deg,#2563eb,#1d4ed8)" : c.cardBorder, border: "none", borderRadius: 8, color: "white", cursor: docText ? "pointer" : "not-allowed", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              <Icon name="shield" size={15} color="white" />Redact & Preview
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- REDACTION PREVIEW ----
+  if (view === "redaction_preview" && redactionResult) {
+    const r = redactionResult;
+    const isGT = backtestComparison?.isDemo;
+    // Generate preview snippets
+    const snippets = [];
+    const seen = new Set();
+    for (const red of r.redactions) {
+      if (seen.has(red.original.toLowerCase()) || snippets.length >= 6) continue;
+      seen.add(red.original.toLowerCase());
+      const idx = docText.toLowerCase().indexOf(red.original.toLowerCase());
+      if (idx === -1) continue;
+      const start = Math.max(0, idx - 50), end = Math.min(docText.length, idx + red.original.length + 50);
+      snippets.push({ ...red, contextOriginal: "..." + docText.substring(start, end) + "...", contextRedacted: "..." + docText.substring(start, end).replace(new RegExp(red.original.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), red.replacement) + "..." });
+    }
+
+    return (
+      <div style={{ minHeight: "100vh", background: c.bg, fontFamily: "'Inter',system-ui,sans-serif", color: c.text }}>{fontLink}{hdr(true)}
+        <div className="r-p" style={{ maxWidth: 800, margin: "0 auto", padding: "28px" }}>
+          <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 3, fontFamily: "'Source Serif 4',Georgia,serif" }}>Document Privacy Review</h2>
+          <p style={{ fontSize: 12, color: c.textMuted, marginBottom: 20 }}>Your original document never leaves your computer. ValuPro has automatically redacted identifying information. Review the changes below.</p>
+
+          {/* Security banner */}
+          <div style={{ ...cardStyle, marginBottom: 14, padding: 14, background: "rgba(5,150,105,0.03)", borderColor: "rgba(5,150,105,0.15)" }}>
+            <div className="vf" style={{ alignItems: "center", gap: 10 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 8, background: "rgba(5,150,105,0.08)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <Icon name="shield" size={18} color={c.success} />
+              </div>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: c.success, marginBottom: 2 }}>Browser-Side Redaction — Your Document is Protected</div>
+                <div style={{ fontSize: 10, color: c.textMuted, lineHeight: 1.5 }}>
+                  All redaction happens locally in your browser. Only the redacted version (shown below) will be sent to our AI engine for term extraction. Party names, dates, addresses, and purchase prices have been replaced with generic placeholders. Financial terms needed for valuation (thresholds, rates, metrics) are preserved.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Stats summary */}
+          <div className="vf r-wrap" style={{ gap: 8, marginBottom: 14 }}>
+            <div style={{ ...cardStyle, padding: "10px 14px", flex: 1, textAlign: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: c.accent, fontFamily: "'IBM Plex Mono',monospace" }}>{r.stats.total}</div>
+              <div style={{ fontSize: 9, color: c.textMuted }}>Items Redacted</div>
+            </div>
+            <div style={{ ...cardStyle, padding: "10px 14px", flex: 1, textAlign: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: c.success, fontFamily: "'IBM Plex Mono',monospace" }}>{r.stats.avgConfidence}%</div>
+              <div style={{ fontSize: 9, color: c.textMuted }}>Avg Confidence</div>
+            </div>
+            <div style={{ ...cardStyle, padding: "10px 14px", flex: 1, textAlign: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: c.text, fontFamily: "'IBM Plex Mono',monospace", textTransform: "capitalize" }}>{r.docType.replace("_", " ")}</div>
+              <div style={{ fontSize: 9, color: c.textMuted }}>Document Type</div>
+            </div>
+            {Object.entries(r.stats.byType).map(([type, count]) => (
+              <div key={type} style={{ ...cardStyle, padding: "10px 14px", flex: 1, textAlign: "center" }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: c.warning, fontFamily: "'IBM Plex Mono',monospace" }}>{count}</div>
+                <div style={{ fontSize: 9, color: c.textMuted, textTransform: "capitalize" }}>{type.replace("_", " ")}s</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Sensitivity level selector */}
+          <div style={{ ...cardStyle, marginBottom: 14, padding: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}><Icon name="sliders" size={13} color={c.accent} /> Redaction Level</div>
+            <div className="vf" style={{ gap: 6 }}>
+              {[{ k: "minimal", l: "Minimal", d: "Party names only — preserves maximum context for extraction" },
+                { k: "standard", l: "Standard", d: "Names + dates + purchase price + addresses + counsel" },
+                { k: "maximum", l: "Maximum", d: "Everything except financial terms — for highly sensitive documents" },
+              ].map(lv => (
+                <button key={lv.k} onClick={() => { setRedactionLevel(lv.k); setRedactionResult(redactDocument(docText, lv.k)); }}
+                  style={{ padding: "8px 12px", textAlign: "left", border: `1.5px solid ${redactionLevel === lv.k ? c.accent : c.cardBorder}`, borderRadius: 6, background: redactionLevel === lv.k ? c.accentLight : "transparent", cursor: "pointer" }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: redactionLevel === lv.k ? c.accent : c.text }}>{lv.l}</div>
+                  <div style={{ fontSize: 10, color: c.textMuted }}>{lv.d}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Side-by-side snippets */}
+          <div style={{ ...cardStyle, marginBottom: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, display: "flex", alignItems: "center", gap: 5 }}><Icon name="fileSearch" size={13} color={c.accent} /> Redaction Preview ({snippets.length} samples)</div>
+            {snippets.map((s, i) => (
+              <div key={i} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: i < snippets.length - 1 ? `1px solid ${c.cardBorder}` : "none" }}>
+                <div className="vf" style={{ gap: 4, marginBottom: 4 }}>
+                  <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "rgba(220,38,38,0.06)", color: c.danger, fontWeight: 500, textTransform: "capitalize" }}>{s.type}</span>
+                  <span style={{ fontSize: 9, color: c.textDim }}>{s.confidence}% confidence</span>
+                  <span style={{ fontSize: 9, color: c.textMuted }}>"{s.original}" → {s.replacement}</span>
+                </div>
+                <div className="vg" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                  <div style={{ padding: "6px 8px", background: "rgba(220,38,38,0.03)", borderRadius: 4, fontSize: 10, color: c.textMuted, lineHeight: 1.5, wordBreak: "break-word", borderLeft: `2px solid ${c.danger}` }}>
+                    {s.contextOriginal}
+                  </div>
+                  <div style={{ padding: "6px 8px", background: "rgba(5,150,105,0.03)", borderRadius: 4, fontSize: 10, color: c.textMuted, lineHeight: 1.5, wordBreak: "break-word", borderLeft: `2px solid ${c.success}` }}>
+                    {s.contextRedacted}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Custom redactions */}
+          <div style={{ ...cardStyle, marginBottom: 14, padding: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Additional Redactions (optional)</div>
+            <div style={{ fontSize: 10, color: c.textMuted, marginBottom: 6 }}>Add any terms the auto-redaction missed, separated by commas:</div>
+            <input value={customRedactions} onChange={e => setCustomRedactions(e.target.value)} placeholder="e.g., Greenfield Technologies, Project Phoenix, James Richardson"
+              style={{ width: "100%", padding: "6px 10px", fontSize: 11, border: `1px solid ${c.cardBorder}`, borderRadius: 6, background: c.inputBg, color: c.text, outline: "none" }} />
+            {customRedactions && (
+              <button onClick={() => {
+                const customs = customRedactions.split(",").map(s => s.trim()).filter(Boolean);
+                let text = redactionResult.redactedText;
+                const newRedactions = [...redactionResult.redactions];
+                for (const term of customs) {
+                  const esc = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                  text = text.replace(new RegExp(esc, "gi"), "[CUSTOM_REDACTED]");
+                  newRedactions.push({ original: term, replacement: "[CUSTOM_REDACTED]", type: "custom", confidence: 100 });
+                }
+                setRedactionResult({ ...redactionResult, redactedText: text, redactions: newRedactions, stats: { ...redactionResult.stats, total: newRedactions.length } });
+              }} style={{ marginTop: 6, padding: "5px 12px", fontSize: 10, background: c.accentLight, border: `1px solid ${c.accent}33`, borderRadius: 4, color: c.accent, cursor: "pointer", fontWeight: 500 }}>Apply Custom Redactions</button>
+            )}
+          </div>
+
+          {/* Action buttons */}
+          <div className="vf r-col" style={{ gap: 10 }}>
+            <button onClick={() => { setView(mode === "backtest" ? "backtest_upload" : "live_upload"); setRedactionResult(null); }} style={{ padding: "10px 20px", background: "transparent", border: `1px solid ${c.cardBorder}`, borderRadius: 8, color: c.text, cursor: "pointer", fontSize: 12 }}>Back</button>
+            <button onClick={proceedFromRedaction} style={{ flex: 1, padding: "12px 24px", background: "linear-gradient(135deg,#059669,#047857)", border: "none", borderRadius: 8, color: "white", cursor: "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, boxShadow: "0 2px 8px rgba(5,150,105,0.3)" }}>
+              <Icon name="check" size={15} color="white" /> Confirm Redaction & {isGT ? "Load Terms" : "Extract Terms"}
             </button>
           </div>
         </div>
