@@ -1131,6 +1131,8 @@ export default function ValuProEarnout() {
   const [redactionResult, setRedactionResult] = useState(null);
   const [redactionLevel, setRedactionLevel] = useState("standard");
   const [customRedactions, setCustomRedactions] = useState("");
+  const [showRedactionBreakdown, setShowRedactionBreakdown] = useState(false);
+  const [showRedactionSamples, setShowRedactionSamples] = useState(false);
 
   // Multi-period earnout params
   const [params, setParams] = useState({
@@ -1642,27 +1644,32 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
             </div>
           </div>
 
-          {/* Stats summary */}
+          {/* Stats summary — compact, expandable breakdown */}
           <div className="vf r-wrap" style={{ gap: 8, marginBottom: 14 }}>
-            <div style={{ ...cardStyle, padding: "10px 14px", flex: 1, textAlign: "center" }}>
-              <div style={{ fontSize: 18, fontWeight: 700, color: c.accent, fontFamily: "'IBM Plex Mono',monospace" }}>{r.stats.total}</div>
-              <div style={{ fontSize: 9, color: c.textMuted }}>Items Redacted</div>
-            </div>
-            <div style={{ ...cardStyle, padding: "10px 14px", flex: 1, textAlign: "center" }}>
-              <div style={{ fontSize: 18, fontWeight: 700, color: c.success, fontFamily: "'IBM Plex Mono',monospace" }}>{r.stats.avgConfidence}%</div>
-              <div style={{ fontSize: 9, color: c.textMuted }}>Avg Confidence</div>
-            </div>
             <div style={{ ...cardStyle, padding: "10px 14px", flex: 1, textAlign: "center" }}>
               <div style={{ fontSize: 18, fontWeight: 700, color: c.text, fontFamily: "'IBM Plex Mono',monospace", textTransform: "capitalize" }}>{r.docType.replace("_", " ")}</div>
               <div style={{ fontSize: 9, color: c.textMuted }}>Document Type</div>
             </div>
-            {Object.entries(r.stats.byType).map(([type, count]) => (
-              <div key={type} style={{ ...cardStyle, padding: "10px 14px", flex: 1, textAlign: "center" }}>
-                <div style={{ fontSize: 18, fontWeight: 700, color: c.warning, fontFamily: "'IBM Plex Mono',monospace" }}>{count}</div>
-                <div style={{ fontSize: 9, color: c.textMuted, textTransform: "capitalize" }}>{type.replace("_", " ")}s</div>
-              </div>
-            ))}
+            <button onClick={() => setShowRedactionBreakdown(p => !p)} style={{ ...cardStyle, padding: "10px 14px", flex: 1, textAlign: "center", cursor: "pointer", border: `1px solid ${showRedactionBreakdown ? c.accent : c.cardBorder}` }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: c.accent, fontFamily: "'IBM Plex Mono',monospace" }}>{r.stats.total}</div>
+              <div style={{ fontSize: 9, color: c.textMuted, display: "flex", alignItems: "center", justifyContent: "center", gap: 3 }}>Items Redacted <Icon name="chevronRight" size={8} color={c.textMuted} /></div>
+            </button>
+            <div style={{ ...cardStyle, padding: "10px 14px", flex: 1, textAlign: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: c.success, fontFamily: "'IBM Plex Mono',monospace" }}>{r.stats.avgConfidence}%</div>
+              <div style={{ fontSize: 9, color: c.textMuted }}>Avg Confidence</div>
+            </div>
           </div>
+          {/* Breakdown — collapsed by default */}
+          {showRedactionBreakdown && (
+            <div className="vf r-wrap" style={{ gap: 6, marginBottom: 14, paddingLeft: 4 }}>
+              {Object.entries(r.stats.byType).map(([type, count]) => (
+                <div key={type} style={{ padding: "6px 12px", borderRadius: 6, background: c.accentLight, fontSize: 10 }}>
+                  <span style={{ fontWeight: 700, color: c.accent, marginRight: 4 }}>{count}</span>
+                  <span style={{ color: c.textMuted, textTransform: "capitalize" }}>{type.replace("_", " ")}{count !== 1 ? "s" : ""}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Sensitivity level selector */}
           <div style={{ ...cardStyle, marginBottom: 14, padding: 14 }}>
@@ -1681,27 +1688,33 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
             </div>
           </div>
 
-          {/* Side-by-side snippets */}
+          {/* Side-by-side snippets — collapsed by default */}
           <div style={{ ...cardStyle, marginBottom: 14 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, display: "flex", alignItems: "center", gap: 5 }}><Icon name="fileSearch" size={13} color={c.accent} /> Redaction Preview ({snippets.length} samples)</div>
-            {snippets.map((s, i) => (
-              <div key={i} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: i < snippets.length - 1 ? `1px solid ${c.cardBorder}` : "none" }}>
-                <div className="vf" style={{ gap: 4, marginBottom: 4 }}>
-                  <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "rgba(220,38,38,0.06)", color: c.danger, fontWeight: 500, textTransform: "capitalize" }}>{s.type}</span>
-                  <span style={{ fontSize: 9, color: c.textDim }}>{s.confidence}% confidence</span>
-                  <span style={{ fontSize: 9, color: c.textMuted }}>"{s.original}" → {s.replacement}</span>
-                </div>
-                <div className="vg" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                  <div style={{ padding: "6px 8px", background: "rgba(220,38,38,0.03)", borderRadius: 4, fontSize: 10, color: c.textMuted, lineHeight: 1.5, wordBreak: "break-word", borderLeft: `2px solid ${c.danger}` }}>
-                    {s.contextOriginal}
+            <button onClick={() => setShowRedactionSamples(p => !p)} style={{ width: "100%", background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 5, color: c.text }}><Icon name="fileSearch" size={13} color={c.accent} /> Redaction Preview ({snippets.length} samples)</div>
+              <Icon name="chevronRight" size={14} color={c.textMuted} />
+            </button>
+            {showRedactionSamples && (
+              <div style={{ marginTop: 12 }}>
+                {snippets.map((s, i) => (
+                  <div key={i} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: i < snippets.length - 1 ? `1px solid ${c.cardBorder}` : "none" }}>
+                    <div className="vf" style={{ gap: 4, marginBottom: 4 }}>
+                      <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "rgba(220,38,38,0.06)", color: c.danger, fontWeight: 500, textTransform: "capitalize" }}>{s.type}</span>
+                      <span style={{ fontSize: 9, color: c.textDim }}>{s.confidence}% confidence</span>
+                      <span style={{ fontSize: 9, color: c.textMuted }}>"{s.original}" → {s.replacement}</span>
+                    </div>
+                    <div className="vg" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                      <div style={{ padding: "6px 8px", background: "rgba(220,38,38,0.03)", borderRadius: 4, fontSize: 10, color: c.textMuted, lineHeight: 1.5, wordBreak: "break-word", borderLeft: `2px solid ${c.danger}` }}>
+                        {s.contextOriginal}
+                      </div>
+                      <div style={{ padding: "6px 8px", background: "rgba(5,150,105,0.03)", borderRadius: 4, fontSize: 10, color: c.textMuted, lineHeight: 1.5, wordBreak: "break-word", borderLeft: `2px solid ${c.success}` }}>
+                        {s.contextRedacted}
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ padding: "6px 8px", background: "rgba(5,150,105,0.03)", borderRadius: 4, fontSize: 10, color: c.textMuted, lineHeight: 1.5, wordBreak: "break-word", borderLeft: `2px solid ${c.success}` }}>
-                    {s.contextRedacted}
-                  </div>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
+            )}
 
           {/* Custom redactions */}
           <div style={{ ...cardStyle, marginBottom: 14, padding: 14 }}>
