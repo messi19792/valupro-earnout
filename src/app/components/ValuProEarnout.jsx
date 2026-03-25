@@ -1573,6 +1573,55 @@ export default function ValuProEarnout() {
     });
   };
 
+  // ---- INTELLIGENT VALUE NORMALIZER ----
+  // Determines whether extracted values are percentages, decimals, or multipliers
+  // and normalizes them to the correct format for the engine
+  const normalizeExtracted = (raw, structure) => {
+    const n = { ...raw };
+
+    // Participation rate: engine expects a multiplier (e.g., 2.5 means $2.50 per $1 excess)
+    // If Claude returns 250 and structure is linear, it likely means 2.5x (extracted 250%)
+    // If Claude returns 0.10 and structure is linear, it means 10% = $0.10 per $1
+    // Rule: if value > 10 and structure is linear/percentage, assume it's a percentage and divide by 100
+    if (n.participationRate != null) {
+      if (n.participationRate > 10 && (structure === "linear" || structure === "percentage")) {
+        n.participationRate = n.participationRate / 100; // 250 → 2.5
+      }
+      // Sanity check: if participationRate × (projectedMetric - threshold) > cap × 20, it's likely wrong
+      if (n.cap && n.threshold && n.projectedMetric) {
+        const impliedPayoff = (n.projectedMetric - n.threshold) * n.participationRate;
+        if (impliedPayoff > n.cap * 20 && n.participationRate > 1) {
+          n.participationRate = n.participationRate / 100; // Still too high, try dividing again
+        }
+      }
+    }
+
+    // Volatility: engine expects decimal (0.40 = 40%)
+    if (n.volatility != null && n.volatility > 1) n.volatility = n.volatility / 100;
+
+    // Discount rate: engine expects decimal (0.12 = 12%)
+    if (n.discountRate != null && n.discountRate > 1) n.discountRate = n.discountRate / 100;
+
+    // Risk-free rate: engine expects decimal (0.043 = 4.3%)
+    if (n.riskFreeRate != null && n.riskFreeRate > 1) n.riskFreeRate = n.riskFreeRate / 100;
+
+    // Credit adjustment: engine expects decimal (0.02 = 2%)
+    if (n.creditAdj != null && n.creditAdj > 1) n.creditAdj = n.creditAdj / 100;
+    if (n.creditAdjustment != null && n.creditAdjustment > 1) n.creditAdjustment = n.creditAdjustment / 100;
+
+    // Growth rate: engine expects decimal (0.08 = 8%)
+    if (n.metricGrowthRate != null && n.metricGrowthRate > 1) n.metricGrowthRate = n.metricGrowthRate / 100;
+
+    // Clawback rate: engine expects decimal
+    if (n.clawbackRate != null && n.clawbackRate > 1) n.clawbackRate = n.clawbackRate / 100;
+
+    // Round projected metrics to avoid floating point artifacts
+    if (n.projectedMetric != null) n.projectedMetric = Math.round(n.projectedMetric);
+    if (n.currentMetric != null) n.currentMetric = Math.round(n.currentMetric);
+
+    return n;
+  };
+
   const runPipeline = async () => {
     setView("processing"); setProgress(0);
     setStage("Analyzing document..."); setProgress(10); await new Promise(r => setTimeout(r, 400));
@@ -1586,16 +1635,20 @@ export default function ValuProEarnout() {
     if (mode === "backtest" && extracted?.earnouts?.length > 0) {
       const e = extracted.earnouts[0];
       const numPeriods = e.measurementPeriods?.length || 3;
-      const newPeriods = Array.from({ length: numPeriods }, (_, i) => ({
-        year: i + 1, yearFromNow: e.measurementPeriods?.[i]?.year || (i + 1),
-        structure: e.structure || "binary", threshold: e.threshold || 0,
-        participationRate: e.participationRate || 0, fixedPayment: e.fixedPayment || (e.maxPayout ? e.maxPayout / numPeriods : 5e6),
-        cap: e.cap || (e.maxPayout ? e.maxPayout / numPeriods : null), floor: e.floor || 0,
-        projectedMetric: e.projectedMetric || params.currentMetric * Math.pow(1.08, i + 1), tiers: null,
-      }));
-      np = { ...params, metric: e.metric || params.metric, currentMetric: e.projectedMetric || params.currentMetric,
-        volatility: e.volatility || params.volatility, discountRate: e.discountRate || params.discountRate,
-        riskFreeRate: e.riskFreeRate || params.riskFreeRate, periods: newPeriods,
+      const newPeriods = Array.from({ length: numPeriods }, (_, i) => {
+        const raw = {
+          year: i + 1, yearFromNow: e.measurementPeriods?.[i]?.year || (i + 1),
+          structure: e.structure || "binary", threshold: e.threshold || 0,
+          participationRate: e.participationRate || 0, fixedPayment: e.fixedPayment || (e.maxPayout ? e.maxPayout / numPeriods : 5e6),
+          cap: e.cap || (e.maxPayout ? e.maxPayout / numPeriods : null), floor: e.floor || 0,
+          projectedMetric: e.projectedMetric || Math.round(params.currentMetric * Math.pow(1.08, i + 1)), tiers: null,
+        };
+        return normalizeExtracted(raw, raw.structure);
+      });
+      const ne = normalizeExtracted({ volatility: e.volatility, discountRate: e.discountRate, riskFreeRate: e.riskFreeRate }, e.structure);
+      np = { ...params, metric: e.metric || params.metric, currentMetric: Math.round(e.projectedMetric || params.currentMetric),
+        volatility: ne.volatility || params.volatility, discountRate: ne.discountRate || params.discountRate,
+        riskFreeRate: ne.riskFreeRate || params.riskFreeRate, periods: newPeriods,
         hasCatchUp: e.hasCatchUp || false, catchUpType: e.catchUpType || null, catchUpMechanism: e.catchUpMechanism || null,
         hasClawback: e.hasClawback || false, clawbackType: e.clawbackType || null, clawbackThreshold: e.clawbackThreshold || 0, clawbackRate: e.clawbackRate || 0,
         hasAcceleration: e.hasAcceleration || false, accelerationType: e.accelerationType || null,
@@ -1609,22 +1662,25 @@ export default function ValuProEarnout() {
       }
     } else if (mode === "live" && extracted?.earnout) {
       const e = extracted.earnout; const a = e.assumptions || {};
-      const newPeriods = (e.periods || []).map((p, i) => ({
-        year: i + 1, yearFromNow: p.yearFromNow || (i + 1), structure: p.structure || e.structure || "linear",
-        threshold: p.threshold || 0, participationRate: p.participationRate || 0, fixedPayment: p.fixedPayment || 0,
-        cap: p.cap || null, floor: p.floor || 0, projectedMetric: p.projectedMetric || 0, tiers: p.tiers || null,
-        // Per-period variant sub-types
-        linearType: p.linearType || null, binaryType: p.binaryType || null, tieredType: p.tieredType || null,
-        percentageType: p.percentageType || null, cagrType: p.cagrType || null, milestoneType: p.milestoneType || null,
-        scaledTiers: p.scaledTiers || null, partialCreditFloor: p.partialCreditFloor || null,
-        baseValue: p.baseValue || (i === 0 ? a.currentMetric : null), cagrTarget: p.cagrTarget || null, cagrFloor: p.cagrFloor || null,
-        milestoneProbability: p.milestoneProbability || null, milestones: p.milestones || null,
-      }));
+      const na = normalizeExtracted({ volatility: a.volatility, discountRate: a.discountRate, riskFreeRate: a.riskFreeRate, creditAdjustment: a.creditAdjustment, metricGrowthRate: a.metricGrowthRate, currentMetric: a.currentMetric }, e.structure);
+      const newPeriods = (e.periods || []).map((p, i) => {
+        const raw = {
+          year: i + 1, yearFromNow: p.yearFromNow || (i + 1), structure: p.structure || e.structure || "linear",
+          threshold: p.threshold || 0, participationRate: p.participationRate || 0, fixedPayment: p.fixedPayment || 0,
+          cap: p.cap || null, floor: p.floor || 0, projectedMetric: p.projectedMetric || 0, tiers: p.tiers || null,
+          linearType: p.linearType || null, binaryType: p.binaryType || null, tieredType: p.tieredType || null,
+          percentageType: p.percentageType || null, cagrType: p.cagrType || null, milestoneType: p.milestoneType || null,
+          scaledTiers: p.scaledTiers || null, partialCreditFloor: p.partialCreditFloor || null,
+          baseValue: p.baseValue || (i === 0 ? na.currentMetric : null), cagrTarget: p.cagrTarget || null, cagrFloor: p.cagrFloor || null,
+          milestoneProbability: p.milestoneProbability || null, milestones: p.milestones || null,
+        };
+        return normalizeExtracted(raw, raw.structure);
+      });
       if (newPeriods.length === 0) newPeriods.push({ ...params.periods[0] });
-      np = { ...params, metric: e.metric || params.metric, currentMetric: a.currentMetric || params.currentMetric,
-        metricGrowthRate: a.metricGrowthRate || params.metricGrowthRate, volatility: a.volatility || params.volatility,
-        discountRate: a.discountRate || params.discountRate, riskFreeRate: a.riskFreeRate || params.riskFreeRate,
-        creditAdj: a.creditAdjustment || params.creditAdj, periods: newPeriods,
+      np = { ...params, metric: e.metric || params.metric, currentMetric: na.currentMetric || params.currentMetric,
+        metricGrowthRate: na.metricGrowthRate || params.metricGrowthRate, volatility: na.volatility || params.volatility,
+        discountRate: na.discountRate || params.discountRate, riskFreeRate: na.riskFreeRate || params.riskFreeRate,
+        creditAdj: na.creditAdjustment || params.creditAdj, periods: newPeriods,
         hasCatchUp: e.hasCatchUp || false, catchUpType: e.catchUpType || null, catchUpMechanism: e.catchUpMechanism || null,
         hasClawback: e.hasClawback || false, clawbackType: e.clawbackType || null,
         clawbackThreshold: e.clawbackThreshold || 0, clawbackRate: e.clawbackRate || 0, clawbackCap: e.clawbackCap || 0,
