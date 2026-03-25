@@ -189,22 +189,67 @@ const generateCorrelatedMetrics = (S0_a, S0_b, growth_a, growth_b, sigma_a, sigm
 
 // ============================================================
 // PAYOFF STRUCTURES (per-period evaluation)
+// Now supports variant sub-types for each structure
 // ============================================================
 const evaluatePayoff = (metricValue, period, allPeriodValues, priorPayments, config) => {
-  const p = period; // current period config
+  const p = period;
   let payoff = 0;
 
   switch (p.structure) {
     case "linear":
-      payoff = Math.max(0, (metricValue - (p.threshold || 0)) * (p.participationRate || 1));
+      // linearType: "standard" | "retroactive" | "with_floor_ratchet"
+      // standard: pay participationRate on excess above threshold
+      // retroactive: if threshold hit, pay participationRate on ENTIRE metric (not just excess)
+      // with_floor_ratchet: floor increases each period if prior period target was hit
+      if (p.linearType === "retroactive") {
+        payoff = metricValue >= (p.threshold || 0) ? metricValue * (p.participationRate || 1) : 0;
+      } else {
+        payoff = Math.max(0, (metricValue - (p.threshold || 0)) * (p.participationRate || 1));
+      }
       break;
 
     case "binary":
-      payoff = metricValue >= (p.threshold || 0) ? (p.fixedPayment || 0) : 0;
+      // binaryType: "standard" | "partial_credit" | "scaled"
+      // standard: threshold met → full payment, not met → zero
+      // partial_credit: proportional payment based on % of threshold achieved (floor at 0)
+      // scaled: multiple tiers of binary (e.g., 80% of target = 50% payment, 100% = 100% payment)
+      if (p.binaryType === "partial_credit") {
+        const achievement = metricValue / (p.threshold || 1);
+        const minAchievement = p.partialCreditFloor || 0; // e.g., 0.8 means below 80% = zero
+        if (achievement >= minAchievement) {
+          payoff = (p.fixedPayment || 0) * Math.min(1, achievement);
+        }
+      } else if (p.binaryType === "scaled" && p.scaledTiers) {
+        // scaledTiers: [{achievementPct: 0.8, payoutPct: 0.5}, {achievementPct: 1.0, payoutPct: 1.0}, ...]
+        const achievement = metricValue / (p.threshold || 1);
+        for (let t = p.scaledTiers.length - 1; t >= 0; t--) {
+          if (achievement >= p.scaledTiers[t].achievementPct) {
+            payoff = (p.fixedPayment || 0) * p.scaledTiers[t].payoutPct;
+            break;
+          }
+        }
+      } else {
+        payoff = metricValue >= (p.threshold || 0) ? (p.fixedPayment || 0) : 0;
+      }
       break;
 
     case "tiered":
-      if (p.tiers && p.tiers.length > 0) {
+      // tieredType: "incremental" | "retroactive" | "cumulative_bracket"
+      // incremental (default): each bracket applies only to the portion within that bracket
+      // retroactive: hitting a higher bracket applies that bracket's rate to ALL units
+      //   retroactiveBase: "from_zero" = rate applies to entire metric value
+      //                    "from_first_tier" (default) = rate applies from first tier's lower bound
+      // cumulative_bracket: tiers based on cumulative metric across all periods
+      if (p.tieredType === "retroactive" && p.tiers && p.tiers.length > 0) {
+        const base = p.retroactiveBase === "from_zero" ? 0 : (p.tiers[0].lower || 0);
+        for (let t = p.tiers.length - 1; t >= 0; t--) {
+          if (metricValue > p.tiers[t].lower) {
+            payoff = (metricValue - base) * p.tiers[t].rate;
+            break;
+          }
+        }
+      } else if (p.tiers && p.tiers.length > 0) {
+        // Incremental (default)
         for (const tier of p.tiers) {
           if (metricValue > tier.lower) {
             const applicable = Math.min(metricValue, tier.upper || Infinity) - tier.lower;
@@ -215,24 +260,80 @@ const evaluatePayoff = (metricValue, period, allPeriodValues, priorPayments, con
       break;
 
     case "percentage":
-      // Fixed percentage of metric value (no threshold)
-      payoff = metricValue * (p.participationRate || 0);
+      // percentageType: "of_metric" | "of_excess" | "of_revenue_band"
+      if (p.percentageType === "of_excess") {
+        payoff = Math.max(0, metricValue - (p.threshold || 0)) * (p.participationRate || 0);
+      } else {
+        payoff = metricValue * (p.participationRate || 0);
+      }
       break;
 
     case "cagr":
-      // Based on compound annual growth rate
-      if (p.baseValue && p.cagrTarget && allPeriodValues.length > 1) {
-        const actualCAGR = Math.pow(metricValue / p.baseValue, 1 / (allPeriodValues.length - 1)) - 1;
-        if (actualCAGR >= p.cagrTarget) {
-          payoff = p.fixedPayment || 0;
+      // cagrType: "binary" | "linear_interpolation" | "tiered_cagr" | "rolling_window"
+      if (p.baseValue && allPeriodValues.length > 0) {
+        const yearsElapsed = p.yearFromNow || allPeriodValues.length;
+
+        if (p.cagrType === "rolling_window" && p.rollingWindowYears) {
+          // Check every consecutive window of N years
+          let windowHit = false;
+          const wLen = p.rollingWindowYears;
+          for (let ws = 0; ws <= allPeriodValues.length - wLen; ws++) {
+            const sv = ws === 0 ? p.baseValue : allPeriodValues[ws - 1];
+            const ev = allPeriodValues[ws + wLen - 1] || metricValue;
+            if (sv > 0) {
+              const wCAGR = Math.pow(ev / sv, 1 / wLen) - 1;
+              if (wCAGR >= (p.cagrTarget || 0)) { windowHit = true; break; }
+            }
+          }
+          if (!windowHit && allPeriodValues.length >= wLen) {
+            const sv = allPeriodValues.length === wLen ? p.baseValue : allPeriodValues[allPeriodValues.length - wLen - 1];
+            if (sv > 0 && Math.pow(metricValue / sv, 1 / wLen) - 1 >= (p.cagrTarget || 0)) windowHit = true;
+          }
+          payoff = windowHit ? (p.fixedPayment || 0) : 0;
+        } else if (p.cagrType === "linear_interpolation") {
+          const actualCAGR = Math.pow(metricValue / p.baseValue, 1 / yearsElapsed) - 1;
+          const minCAGR = p.cagrFloor || 0;
+          const maxCAGR = p.cagrTarget || 0.15;
+          const minPay = p.floor || 0;
+          const maxPay = p.fixedPayment || p.cap || 0;
+          if (actualCAGR >= maxCAGR) payoff = maxPay;
+          else if (actualCAGR >= minCAGR) payoff = minPay + (maxPay - minPay) * ((actualCAGR - minCAGR) / (maxCAGR - minCAGR));
+        } else if (p.cagrType === "tiered_cagr" && p.cagrTiers) {
+          const actualCAGR = Math.pow(metricValue / p.baseValue, 1 / yearsElapsed) - 1;
+          for (let t = p.cagrTiers.length - 1; t >= 0; t--) {
+            if (actualCAGR >= p.cagrTiers[t].cagrThreshold) { payoff = p.cagrTiers[t].payment; break; }
+          }
+        } else {
+          const actualCAGR = Math.pow(metricValue / p.baseValue, 1 / yearsElapsed) - 1;
+          if (actualCAGR >= (p.cagrTarget || 0)) payoff = p.fixedPayment || 0;
         }
       }
       break;
 
     case "milestone":
-      // Binary milestone (non-financial: regulatory, product launch, etc.)
-      // Modeled as probability-weighted binary
-      payoff = (Math.random() < (p.milestoneProbability || 0.5)) ? (p.fixedPayment || 0) : 0;
+      // milestoneType: "independent" | "sequential" | "compound" | "time_decay"
+      // time_decay: probability decreases over time (more likely to achieve early milestones)
+      if (p.milestoneType === "time_decay") {
+        // Time-decay: probability = baseProbability × exp(-decayRate × yearFromNow)
+        const basePr = p.milestoneProbability || 0.5;
+        const decay = p.milestoneDecayRate || 0.1;
+        const adjPr = basePr * Math.exp(-decay * (p.yearFromNow || 1));
+        payoff = (Math.random() < adjPr) ? (p.fixedPayment || 0) : 0;
+      } else if (p.milestoneType === "compound" && p.milestones) {
+        const allHit = p.milestones.every(m => Math.random() < (m.probability || 0.5));
+        payoff = allHit ? (p.fixedPayment || 0) : 0;
+      } else if (p.milestoneType === "sequential" && p.milestones) {
+        let allPriorHit = true;
+        let totalMilestonePay = 0;
+        for (const m of p.milestones) {
+          if (allPriorHit && Math.random() < (m.probability || 0.5)) {
+            totalMilestonePay += m.payment || 0;
+          } else { allPriorHit = false; }
+        }
+        payoff = totalMilestonePay;
+      } else {
+        payoff = (Math.random() < (p.milestoneProbability || 0.5)) ? (p.fixedPayment || 0) : 0;
+      }
       break;
 
     default:
@@ -352,6 +453,7 @@ const runMultiPeriodMC = (config) => {
     let cumulativeMetric = 0;
     let cumulativePayments = 0;
     let priorShortfall = 0;
+    let priorUnpaidPayoff = 0; // For adjust_payoff catch-up mechanism
     let excessCarryForward = 0;
     let accelerated = false;
     let clawbackAmount = 0;
@@ -387,29 +489,71 @@ const runMultiPeriodMC = (config) => {
 
       metricPath.push(metricValue);
 
-      // Check acceleration trigger
-      if (hasAcceleration && !accelerated && Math.random() < accelerationProb) {
-        accelerated = true;
-        let acceleratedPayoff = 0;
-        if (accelerationTreatment === "max") {
-          for (let rIdx = pIdx; rIdx < numPeriods; rIdx++) {
-            acceleratedPayoff += periods[rIdx].cap || periods[rIdx].fixedPayment || 0;
-          }
-        } else {
-          for (let rIdx = pIdx; rIdx < numPeriods; rIdx++) {
-            const pm = periods[rIdx].projectedMetric || projectedMetric;
-            acceleratedPayoff += evaluatePayoff(pm * (accelerationPercentile / 100), periods[rIdx], metricPath, cumulativePayments, config);
-          }
+      // Check acceleration trigger — time-varying hazard rate
+      // accelerationHazardShape: "flat" (default) | "decreasing" | "increasing"
+      // decreasing: higher probability early (integration risk), lower later
+      // increasing: higher probability late (buyer may sell after integration)
+      if (hasAcceleration && !accelerated) {
+        let adjProb = accelerationProb;
+        const hazardShape = config.accelerationHazardShape || "flat";
+        if (hazardShape === "decreasing") {
+          // Probability decays: P(t) = baseProb × exp(-0.3 × t)
+          adjProb = accelerationProb * Math.exp(-0.3 * pIdx);
+        } else if (hazardShape === "increasing") {
+          // Probability increases: P(t) = baseProb × (1 + 0.5 × t)
+          adjProb = accelerationProb * (1 + 0.5 * pIdx);
         }
-        if (hasMultiYearCap) acceleratedPayoff = Math.min(acceleratedPayoff, multiYearCap - cumulativePayments);
-        totalPayoff += acceleratedPayoff * Math.exp(-effectivePayoffDiscount * discountT);
-        periodPayoffs.push(acceleratedPayoff);
-        break;
+        adjProb = Math.min(adjProb, 0.99); // Cap at 99%
+
+        if (Math.random() < adjProb) {
+          accelerated = true;
+          let acceleratedPayoff = 0;
+          const accType = config.accelerationType || "pay_maximum";
+          if (accType === "pay_maximum") {
+            for (let rIdx = pIdx; rIdx < numPeriods; rIdx++) {
+              acceleratedPayoff += periods[rIdx].cap || periods[rIdx].fixedPayment || 0;
+            }
+          } else if (accType === "pay_pro_rata") {
+            // Pay based on current metric relative to remaining targets
+            for (let rIdx = pIdx; rIdx < numPeriods; rIdx++) {
+              acceleratedPayoff += evaluatePayoff(metricValue, periods[rIdx], metricPath, cumulativePayments, config);
+            }
+          } else {
+            // pay_expected: use projected metrics
+            for (let rIdx = pIdx; rIdx < numPeriods; rIdx++) {
+              const pm = periods[rIdx].projectedMetric || projectedMetric;
+              acceleratedPayoff += evaluatePayoff(pm * (accelerationPercentile / 100), periods[rIdx], metricPath, cumulativePayments, config);
+            }
+          }
+          if (hasMultiYearCap) acceleratedPayoff = Math.min(acceleratedPayoff, multiYearCap - cumulativePayments);
+          totalPayoff += acceleratedPayoff * Math.exp(-effectivePayoffDiscount * discountT);
+          periodPayoffs.push(acceleratedPayoff);
+          break;
+        }
       }
 
-      // Apply catch-up: reduce threshold by prior shortfall
+      // Apply catch-up based on variant type
+      // catchUpMechanism: "adjust_metric" (default) | "adjust_payoff"
+      // adjust_metric: adds shortfall to the metric before evaluating payoff (equivalent for binary, not for tiered)
+      // adjust_payoff: evaluates payoff normally, then adds prior unpaid payoffs directly
+      const catchUpMechanism = config.catchUpMechanism || "adjust_metric";
+      let catchUpPayoffAddition = 0;
+
       if (hasCatchUp && priorShortfall > 0) {
-        metricValue = metricValue + priorShortfall;
+        const catchUpType = config.catchUpType || "carry_forward_payment";
+        if (catchUpMechanism === "adjust_payoff") {
+          // Don't modify metric — we'll add unpaid payoffs after evaluating this period's payoff
+          catchUpPayoffAddition = priorUnpaidPayoff || 0;
+        } else {
+          // adjust_metric (default)
+          if (catchUpType === "threshold_adjustment") {
+            metricValue = metricValue + priorShortfall;
+          } else if (catchUpType === "cumulative_target") {
+            // Don't modify metric — cumulative evaluation happens below
+          } else {
+            metricValue = metricValue + priorShortfall;
+          }
+        }
       }
 
       // Apply carry-forward: add excess from prior period
@@ -431,19 +575,37 @@ const runMultiPeriodMC = (config) => {
       // Calculate period payoff
       let periodPayoff = evaluatePayoff(metricValue, period, metricPath, cumulativePayments, config);
 
+      // Apply catch-up payoff addition (for "adjust_payoff" mechanism)
+      // This adds prior unpaid payoffs directly instead of adjusting the metric
+      if (catchUpPayoffAddition > 0 && periodPayoff > 0) {
+        // Only pay catch-up if this period's target was met (payoff > 0)
+        periodPayoff += catchUpPayoffAddition;
+        priorUnpaidPayoff = 0;
+      }
+
       // Track excess for carry-forward
       if (hasCarryForward && period.cap && periodPayoff >= period.cap) {
         const uncapped = evaluatePayoff(metricValue, { ...period, cap: null }, metricPath, cumulativePayments, config);
         excessCarryForward = uncapped - periodPayoff;
       }
 
-      // Track shortfall for catch-up
+      // Track shortfall and unpaid payoffs for catch-up
       if (hasCatchUp) {
-        const target = period.threshold || 0;
-        if (metricValue < target) {
-          priorShortfall = target - metricValue;
+        const catchUpType = config.catchUpType || "carry_forward_payment";
+        if (catchUpType === "cumulative_target") {
+          const cumulativeRequired = periods.slice(0, pIdx + 1).reduce((s, pp) => s + (pp.threshold || 0), 0);
+          priorShortfall = Math.max(0, cumulativeRequired - cumulativeMetric - metricValue);
         } else {
-          priorShortfall = 0;
+          const target = period.threshold || 0;
+          if (metricValue < target) {
+            priorShortfall = target - metricValue;
+            // Track what WOULD have been paid for adjust_payoff mechanism
+            const wouldHavePaid = evaluatePayoff(target, period, metricPath, cumulativePayments, config);
+            priorUnpaidPayoff += wouldHavePaid;
+          } else {
+            priorShortfall = 0;
+            priorUnpaidPayoff = 0;
+          }
         }
       }
 
@@ -456,8 +618,22 @@ const runMultiPeriodMC = (config) => {
       // Cumulative target check
       cumulativeMetric += metricValue;
       if (hasCumulativeTarget && pIdx === numPeriods - 1) {
-        if (cumulativeMetric < cumulativeTarget) {
-          periodPayoff = 0;
+        // cumulativeTargetType: "all_or_nothing" | "pro_rata" | "excess_only"
+        const ctType = config.cumulativeTargetType || "all_or_nothing";
+        if (ctType === "pro_rata") {
+          // Pay proportional to achievement
+          const achievement = cumulativeMetric / (cumulativeTarget || 1);
+          if (achievement < 1) periodPayoff = periodPayoff * achievement;
+        } else if (ctType === "excess_only") {
+          // Only pay if cumulative exceeds target, and pay based on excess
+          if (cumulativeMetric < cumulativeTarget) periodPayoff = 0;
+        } else {
+          // all_or_nothing (default): if cumulative below target, ALL payments forfeited
+          if (cumulativeMetric < cumulativeTarget) {
+            periodPayoff = 0;
+            // Also zero out all prior period payoffs in this path
+            totalPayoff = 0;
+          }
         }
       }
 
@@ -470,13 +646,55 @@ const runMultiPeriodMC = (config) => {
     }
 
     // Clawback evaluation (at end of all periods)
-    if (hasClawback && cumulativeMetric < clawbackThreshold) {
-      const clawback = Math.min(
-        cumulativePayments * clawbackRate,
-        clawbackCap > 0 ? clawbackCap : Infinity
-      );
-      totalPayoff -= clawback * Math.exp(-effectivePayoffDiscount * numPeriods);
-      clawbackAmount = clawback;
+    // clawbackType: "terminal_cumulative" | "per_period" | "cumulative_shortfall" | "lookback"
+    if (hasClawback) {
+      const clawbackType = config.clawbackType || "terminal_cumulative";
+      let clawback = 0;
+      let clawbackDiscountedValue = 0; // Track properly discounted clawback
+      if (clawbackType === "per_period") {
+        // Each period evaluated independently — clawback each period that missed
+        for (let cb = 0; cb < numPeriods; cb++) {
+          const cbMetric = metricPath[cb + 1] || 0;
+          const cbThreshold = periods[cb].clawbackFloor || clawbackThreshold;
+          if (cbMetric < cbThreshold && periodPayoffs[cb] > 0) {
+            const periodClawback = Math.min(periodPayoffs[cb] * clawbackRate, clawbackCap > 0 ? clawbackCap - clawback : Infinity);
+            clawback += periodClawback;
+            // Discount clawback at the time it would occur (clawback determination date, typically end of period)
+            const cbDiscountT = (periods[cb].yearFromNow || (cb + 1)) + (paymentDelay / 365);
+            clawbackDiscountedValue += periodClawback * Math.exp(-effectivePayoffDiscount * cbDiscountT);
+          }
+        }
+        if (clawbackCap > 0) clawback = Math.min(clawback, clawbackCap);
+      } else if (clawbackType === "cumulative_shortfall") {
+        if (cumulativeMetric < clawbackThreshold) {
+          const shortfallPct = 1 - (cumulativeMetric / (clawbackThreshold || 1));
+          clawback = Math.min(cumulativePayments * shortfallPct * clawbackRate, clawbackCap > 0 ? clawbackCap : Infinity);
+          clawbackDiscountedValue = clawback * Math.exp(-effectivePayoffDiscount * (periods[numPeriods - 1]?.yearFromNow || numPeriods));
+        }
+      } else if (clawbackType === "lookback") {
+        // Lookback: any period below floor triggers recovery of that period's payment
+        for (let lb = 0; lb < numPeriods; lb++) {
+          const lbMetric = metricPath[lb + 1] || 0;
+          const lbFloor = periods[lb].clawbackFloor || clawbackThreshold;
+          if (lbMetric < lbFloor && periodPayoffs[lb] > 0) {
+            const periodClawback = periodPayoffs[lb] * clawbackRate;
+            clawback += periodClawback;
+            // Lookback clawback typically occurs at end of earnout period
+            clawbackDiscountedValue += periodClawback * Math.exp(-effectivePayoffDiscount * (periods[numPeriods - 1]?.yearFromNow || numPeriods));
+          }
+        }
+        if (clawbackCap > 0) { clawback = Math.min(clawback, clawbackCap); clawbackDiscountedValue = Math.min(clawbackDiscountedValue, clawbackCap * Math.exp(-effectivePayoffDiscount * numPeriods)); }
+      } else {
+        // terminal_cumulative (default)
+        if (cumulativeMetric < clawbackThreshold) {
+          clawback = Math.min(cumulativePayments * clawbackRate, clawbackCap > 0 ? clawbackCap : Infinity);
+          clawbackDiscountedValue = clawback * Math.exp(-effectivePayoffDiscount * (periods[numPeriods - 1]?.yearFromNow || numPeriods));
+        }
+      }
+      if (clawbackDiscountedValue > 0) {
+        totalPayoff -= clawbackDiscountedValue;
+        clawbackAmount = clawback;
+      }
     }
 
     allResults.push(totalPayoff);
@@ -561,13 +779,37 @@ const runSensitivity = (baseConfig, paramKey, range, steps = 12) => {
 const extractFromDocument = async (text, mode) => {
   const systemPrompts = {
     backtest: `You are a financial data extraction specialist. Extract earnout/contingent consideration from SEC filings.
+
+CRITICAL: For each path-dependent feature, classify the SPECIFIC VARIANT TYPE from the disclosure language. Do not just return true/false.
+
 Return ONLY valid JSON, no markdown:
-{"earnouts":[{"name":"string","acquisitionDate":"string or null","maxPayout":number or null,"initialFairValue":number or null,"currentFairValue":number or null,"priorFairValue":number or null,"fairValueChange":number or null,"metric":"string or null","structure":"linear|binary|tiered|milestone|percentage|cagr|unknown","threshold":number or null,"participationRate":number or null,"cap":number or null,"floor":number or null,"fixedPayment":number or null,"measurementPeriods":[{"year":number,"target":number or null,"label":"string"}],"hasCatchUp":boolean,"hasClawback":boolean,"hasAcceleration":boolean,"accelerationTrigger":"string or null","hasCumulativeTarget":boolean,"cumulativeTarget":number or null,"multiYearCap":number or null,"methodology":"Monte Carlo|probability-weighted|DCF|unknown","discountRate":number or null,"volatility":number or null,"riskFreeRate":number or null,"projectedMetric":number or null,"level3Rollforward":{"openingBalance":number or null,"additions":number or null,"fairValueChanges":number or null,"payments":number or null,"closingBalance":number or null},"confidenceScore":number,"provenance":{"volatilitySource":"string or null","discountRateSource":"string or null","projectionSource":"string or null","methodologyQuote":"string or null","level3DisclosureText":"string or null","comparableCompanies":["string"] or null,"referencedDocuments":["string"] or null}}],"reportingPeriod":"string","companyName":"string","filingType":"10-K|10-Q"}
-Extract EVERY earnout. Use null for undisclosed. For provenance: extract any text describing HOW assumptions were derived (e.g. "volatility based on comparable company analysis"), any comparable company names mentioned, any external documents referenced (e.g. "per the Merger Agreement Section 2.4"), and any direct quotes about methodology.`,
+{"earnouts":[{"name":"string","acquisitionDate":"string or null","maxPayout":number or null,"initialFairValue":number or null,"currentFairValue":number or null,"priorFairValue":number or null,"fairValueChange":number or null,"metric":"string or null","structure":"linear|binary|tiered|milestone|percentage|cagr|unknown","structureSubType":"string or null","threshold":number or null,"participationRate":number or null,"cap":number or null,"floor":number or null,"fixedPayment":number or null,"measurementPeriods":[{"year":number,"target":number or null,"label":"string"}],"hasCatchUp":boolean,"catchUpType":"carry_forward_payment|cumulative_target|threshold_adjustment|metric_carry_forward|null","hasClawback":boolean,"clawbackType":"terminal_cumulative|per_period|cumulative_shortfall|lookback|null","clawbackThreshold":number or null,"clawbackRate":number or null,"hasAcceleration":boolean,"accelerationType":"pay_maximum|pay_expected|pay_pro_rata|null","accelerationTrigger":"string or null","hasCumulativeTarget":boolean,"cumulativeTarget":number or null,"cumulativeTargetType":"all_or_nothing|pro_rata|excess_only|null","multiYearCap":number or null,"hasCarryForward":boolean,"binaryType":"standard|partial_credit|scaled|null","tieredType":"incremental|retroactive|null","linearType":"standard|retroactive|null","cagrType":"binary|linear_interpolation|tiered_cagr|null","milestoneType":"independent|sequential|compound|null","methodology":"Monte Carlo|probability-weighted|DCF|unknown","discountRate":number or null,"volatility":number or null,"riskFreeRate":number or null,"projectedMetric":number or null,"level3Rollforward":{"openingBalance":number or null,"additions":number or null,"fairValueChanges":number or null,"payments":number or null,"closingBalance":number or null},"confidenceScore":number,"provenance":{"volatilitySource":"string or null","discountRateSource":"string or null","projectionSource":"string or null","methodologyQuote":"string or null","level3DisclosureText":"string or null","comparableCompanies":["string"] or null,"referencedDocuments":["string"] or null}}],"reportingPeriod":"string","companyName":"string","filingType":"10-K|10-Q"}
+Extract EVERY earnout. Use null for undisclosed. For provenance: extract any text describing HOW assumptions were derived, comparable company names, external documents referenced, and methodology quotes.
+
+VARIANT TYPE GUIDE:
+- catchUpType: "carry_forward_payment" = unpaid amounts roll forward; "cumulative_target" = single cumulative metric; "threshold_adjustment" = shortfall increases next threshold
+- clawbackType: "terminal_cumulative" = evaluated at end; "per_period" = each period independent; "cumulative_shortfall" = proportional to gap; "lookback" = any period below floor
+- accelerationType: "pay_maximum" = full remaining max; "pay_expected" = probability-weighted; "pay_pro_rata" = based on metric at trigger
+- cumulativeTargetType: "all_or_nothing" = miss = forfeit all; "pro_rata" = proportional; "excess_only" = pay only if exceeded
+- binaryType: "standard" = threshold met = pay; "partial_credit" = proportional; "scaled" = tiered achievement
+- tieredType: "incremental" = each bracket to its range; "retroactive" = highest rate to all`,
 
     live_ppa: `You are a valuation report extraction specialist. Extract earnout terms AND their provenance from a PPA valuation report.
+
+CRITICAL: For each path-dependent feature, you must classify the SPECIFIC VARIANT TYPE by reading the actual agreement/report language. Do not just return true/false — identify HOW the mechanism works.
+
 Return ONLY valid JSON, no markdown:
-{"earnout":{"name":"string","metric":"string","metricDefinition":"string","structure":"linear|binary|tiered|milestone|percentage|cagr|multi-metric","periods":[{"year":number,"yearFromNow":number,"threshold":number or null,"cap":number or null,"floor":number or null,"fixedPayment":number or null,"participationRate":number or null,"projectedMetric":number or null,"tiers":[{"lower":number,"upper":number,"rate":number}] or null}],"hasCatchUp":boolean,"catchUpDescription":"string or null","hasClawback":boolean,"clawbackThreshold":number or null,"clawbackRate":number or null,"clawbackCap":number or null,"hasAcceleration":boolean,"accelerationTrigger":"string or null","accelerationTreatment":"string or null","hasCumulativeTarget":boolean,"cumulativeTarget":number or null,"hasMultiYearCap":boolean,"multiYearCap":number or null,"hasCarryForward":boolean,"isMultiMetric":boolean,"secondMetric":{"name":"string","threshold":number,"currentValue":number,"growthRate":number,"volatility":number} or null,"metricCorrelation":number or null,"paymentTiming":"string","paymentDelay":number or null,"isEscrowed":boolean,"methodology":"Monte Carlo|probability-weighted|DCF","assumptions":{"currentMetric":number,"metricGrowthRate":number or null,"volatility":number,"discountRate":number,"riskFreeRate":number,"creditAdjustment":number or null,"comparableCompanies":["string"] or null},"initialFairValue":number or null,"currency":"string","confidenceScore":number,"ambiguities":["string"],"alternativeInterpretations":[{"clause":"string","interpretation1":"string","interpretation2":"string"}] or null,"provenance":{"volatility":{"value":number or null,"methodology":"string or null","comparableCompanies":[{"name":"string","ticker":"string or null","volatility":number or null}] or null,"deLeveringMethod":"string or null","dataDateRange":"string or null","sourceLocation":"string or null"},"discountRate":{"value":number or null,"methodology":"string or null","components":{"riskFreeRate":number or null,"equityRiskPremium":number or null,"sizePremium":number or null,"companySpecificRisk":number or null,"beta":number or null,"costOfDebt":number or null,"debtWeight":number or null,"equityWeight":number or null} or null,"sourceLocation":"string or null"},"projections":{"source":"string or null","forecastDate":"string or null","provider":"string or null","sourceLocation":"string or null"},"creditRisk":{"methodology":"string or null","acquirerRating":"string or null","sourceLocation":"string or null"},"referencedDocuments":["string"] or null,"methodologyQuote":"string or null"}}}`
+{"earnout":{"name":"string","metric":"string","metricDefinition":"string","structure":"linear|binary|tiered|milestone|percentage|cagr|multi-metric","structureSubType":"string or null","periods":[{"year":number,"yearFromNow":number,"threshold":number or null,"cap":number or null,"floor":number or null,"fixedPayment":number or null,"participationRate":number or null,"projectedMetric":number or null,"tiers":[{"lower":number,"upper":number,"rate":number}] or null,"linearType":"standard|retroactive|null","binaryType":"standard|partial_credit|scaled|null","tieredType":"incremental|retroactive|null","percentageType":"of_metric|of_excess|null","cagrType":"binary|linear_interpolation|tiered_cagr|null","milestoneType":"independent|sequential|compound|null","scaledTiers":[{"achievementPct":number,"payoutPct":number}] or null,"partialCreditFloor":number or null,"baseValue":number or null,"cagrTarget":number or null,"cagrFloor":number or null,"milestoneProbability":number or null,"milestones":[{"name":"string","probability":number,"payment":number}] or null}],"hasCatchUp":boolean,"catchUpType":"carry_forward_payment|cumulative_target|threshold_adjustment|metric_carry_forward|null","catchUpDescription":"string or null","hasClawback":boolean,"clawbackType":"terminal_cumulative|per_period|cumulative_shortfall|lookback|null","clawbackThreshold":number or null,"clawbackRate":number or null,"clawbackCap":number or null,"clawbackDescription":"string or null","hasAcceleration":boolean,"accelerationType":"pay_maximum|pay_expected|pay_pro_rata|null","accelerationTrigger":"string or null","accelerationDescription":"string or null","hasCumulativeTarget":boolean,"cumulativeTarget":number or null,"cumulativeTargetType":"all_or_nothing|pro_rata|excess_only|null","hasMultiYearCap":boolean,"multiYearCap":number or null,"hasCarryForward":boolean,"isMultiMetric":boolean,"secondMetric":{"name":"string","threshold":number,"currentValue":number,"growthRate":number,"volatility":number} or null,"metricCorrelation":number or null,"paymentTiming":"string","paymentDelay":number or null,"isEscrowed":boolean,"methodology":"Monte Carlo|probability-weighted|DCF","assumptions":{"currentMetric":number,"metricGrowthRate":number or null,"volatility":number,"discountRate":number,"riskFreeRate":number,"creditAdjustment":number or null,"comparableCompanies":["string"] or null},"initialFairValue":number or null,"currency":"string","confidenceScore":number,"ambiguities":["string"],"alternativeInterpretations":[{"clause":"string","interpretation1":"string","interpretation2":"string"}] or null,"provenance":{"volatility":{"value":number or null,"methodology":"string or null","comparableCompanies":[{"name":"string","ticker":"string or null","volatility":number or null}] or null,"deLeveringMethod":"string or null","dataDateRange":"string or null","sourceLocation":"string or null"},"discountRate":{"value":number or null,"methodology":"string or null","components":{"riskFreeRate":number or null,"equityRiskPremium":number or null,"sizePremium":number or null,"companySpecificRisk":number or null,"beta":number or null,"costOfDebt":number or null,"debtWeight":number or null,"equityWeight":number or null} or null,"sourceLocation":"string or null"},"projections":{"source":"string or null","forecastDate":"string or null","provider":"string or null","sourceLocation":"string or null"},"creditRisk":{"methodology":"string or null","acquirerRating":"string or null","sourceLocation":"string or null"},"referencedDocuments":["string"] or null,"methodologyQuote":"string or null"}}}
+
+VARIANT TYPE CLASSIFICATION GUIDE:
+- catchUpType: "carry_forward_payment" = unpaid amounts roll forward; "cumulative_target" = single cumulative metric evaluated; "threshold_adjustment" = missed shortfall increases next threshold; "metric_carry_forward" = prior metric added to current
+- clawbackType: "terminal_cumulative" = evaluated only at end on cumulative metric; "per_period" = each period evaluated independently; "cumulative_shortfall" = proportional to cumulative shortfall; "lookback" = any period below floor triggers recovery
+- accelerationType: "pay_maximum" = full remaining max on trigger; "pay_expected" = probability-weighted remaining; "pay_pro_rata" = based on metric at trigger date
+- cumulativeTargetType: "all_or_nothing" = miss cumulative = forfeit all; "pro_rata" = proportional to achievement; "excess_only" = pay only if cumulative exceeded
+- binaryType: "standard" = threshold met = full pay; "partial_credit" = proportional to achievement; "scaled" = tiered achievement levels
+- tieredType: "incremental" = each bracket applies to its range only; "retroactive" = highest bracket rate applies to all
+- cagrType: "binary" = hit CAGR = fixed payment; "linear_interpolation" = scales between min/max CAGR; "tiered_cagr" = different payment per CAGR bracket
+- milestoneType: "independent" = each milestone separate; "sequential" = each conditional on prior; "compound" = all must be achieved`
   };
 
   try {
@@ -1230,9 +1472,12 @@ export default function ValuProEarnout() {
       np = { ...params, metric: e.metric || params.metric, currentMetric: e.projectedMetric || params.currentMetric,
         volatility: e.volatility || params.volatility, discountRate: e.discountRate || params.discountRate,
         riskFreeRate: e.riskFreeRate || params.riskFreeRate, periods: newPeriods,
-        hasCatchUp: e.hasCatchUp || false, hasClawback: e.hasClawback || false,
-        hasAcceleration: e.hasAcceleration || false, hasMultiYearCap: e.multiYearCap ? true : false,
-        multiYearCap: e.multiYearCap || e.maxPayout || 15e6,
+        hasCatchUp: e.hasCatchUp || false, catchUpType: e.catchUpType || null,
+        hasClawback: e.hasClawback || false, clawbackType: e.clawbackType || null, clawbackThreshold: e.clawbackThreshold || 0, clawbackRate: e.clawbackRate || 0,
+        hasAcceleration: e.hasAcceleration || false, accelerationType: e.accelerationType || null,
+        hasCumulativeTarget: e.hasCumulativeTarget || false, cumulativeTarget: e.cumulativeTarget || 0, cumulativeTargetType: e.cumulativeTargetType || null,
+        hasMultiYearCap: e.multiYearCap ? true : false, multiYearCap: e.multiYearCap || e.maxPayout || 15e6,
+        hasCarryForward: e.hasCarryForward || false,
       };
       if (e.currentFairValue || e.initialFairValue) {
         setBacktestComparison({ reported: e.currentFairValue || e.initialFairValue, computed: null, gap: null });
@@ -1243,16 +1488,25 @@ export default function ValuProEarnout() {
         year: i + 1, yearFromNow: p.yearFromNow || (i + 1), structure: p.structure || e.structure || "linear",
         threshold: p.threshold || 0, participationRate: p.participationRate || 0, fixedPayment: p.fixedPayment || 0,
         cap: p.cap || null, floor: p.floor || 0, projectedMetric: p.projectedMetric || 0, tiers: p.tiers || null,
+        // Per-period variant sub-types
+        linearType: p.linearType || null, binaryType: p.binaryType || null, tieredType: p.tieredType || null,
+        percentageType: p.percentageType || null, cagrType: p.cagrType || null, milestoneType: p.milestoneType || null,
+        scaledTiers: p.scaledTiers || null, partialCreditFloor: p.partialCreditFloor || null,
+        baseValue: p.baseValue || (i === 0 ? a.currentMetric : null), cagrTarget: p.cagrTarget || null, cagrFloor: p.cagrFloor || null,
+        milestoneProbability: p.milestoneProbability || null, milestones: p.milestones || null,
       }));
       if (newPeriods.length === 0) newPeriods.push({ ...params.periods[0] });
       np = { ...params, metric: e.metric || params.metric, currentMetric: a.currentMetric || params.currentMetric,
         metricGrowthRate: a.metricGrowthRate || params.metricGrowthRate, volatility: a.volatility || params.volatility,
         discountRate: a.discountRate || params.discountRate, riskFreeRate: a.riskFreeRate || params.riskFreeRate,
         creditAdj: a.creditAdjustment || params.creditAdj, periods: newPeriods,
-        hasCatchUp: e.hasCatchUp || false, hasClawback: e.hasClawback || false,
-        hasAcceleration: e.hasAcceleration || false, hasMultiYearCap: e.hasMultiYearCap || false,
-        multiYearCap: e.multiYearCap || 0, hasCarryForward: e.hasCarryForward || false,
-        hasCumulativeTarget: e.hasCumulativeTarget || false, cumulativeTarget: e.cumulativeTarget || 0,
+        hasCatchUp: e.hasCatchUp || false, catchUpType: e.catchUpType || null,
+        hasClawback: e.hasClawback || false, clawbackType: e.clawbackType || null,
+        clawbackThreshold: e.clawbackThreshold || 0, clawbackRate: e.clawbackRate || 0, clawbackCap: e.clawbackCap || 0,
+        hasAcceleration: e.hasAcceleration || false, accelerationType: e.accelerationType || null,
+        hasCumulativeTarget: e.hasCumulativeTarget || false, cumulativeTarget: e.cumulativeTarget || 0, cumulativeTargetType: e.cumulativeTargetType || null,
+        hasMultiYearCap: e.hasMultiYearCap || false, multiYearCap: e.multiYearCap || 0,
+        hasCarryForward: e.hasCarryForward || false,
         isMultiMetric: e.isMultiMetric || false, secondMetric: e.secondMetric || null,
         isEscrowed: e.isEscrowed || false, paymentDelay: e.paymentDelay || 120,
       };
