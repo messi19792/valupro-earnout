@@ -187,6 +187,66 @@ const generateCorrelatedMetrics = (S0_a, S0_b, growth_a, growth_b, sigma_a, sigm
   return { a: valuesA, b: valuesB };
 };
 
+// Estimate multi-metric correlation from historical data or industry defaults
+const estimateMetricCorrelation = (config) => {
+  // Priority 1: User-specified correlation (always wins)
+  if (config.metricCorrelation != null && config.metricCorrelation !== 0.5) return config.metricCorrelation;
+
+  // Priority 2: Historical data (if extracted by Claude)
+  const hist = config.historicalMetricData; // [{metricA: number, metricB: number}, ...]
+  if (hist && hist.length >= 3) {
+    // Compute Pearson correlation from historical growth rates
+    const growthsA = [], growthsB = [];
+    for (let i = 1; i < hist.length; i++) {
+      if (hist[i].metricA > 0 && hist[i - 1].metricA > 0) growthsA.push(hist[i].metricA / hist[i - 1].metricA - 1);
+      if (hist[i].metricB > 0 && hist[i - 1].metricB > 0) growthsB.push(hist[i].metricB / hist[i - 1].metricB - 1);
+    }
+    const n = Math.min(growthsA.length, growthsB.length);
+    if (n >= 2) {
+      const meanA = growthsA.slice(0, n).reduce((s, v) => s + v, 0) / n;
+      const meanB = growthsB.slice(0, n).reduce((s, v) => s + v, 0) / n;
+      let cov = 0, varA = 0, varB = 0;
+      for (let i = 0; i < n; i++) {
+        cov += (growthsA[i] - meanA) * (growthsB[i] - meanB);
+        varA += (growthsA[i] - meanA) ** 2;
+        varB += (growthsB[i] - meanB) ** 2;
+      }
+      if (varA > 0 && varB > 0) {
+        const corr = cov / (Math.sqrt(varA) * Math.sqrt(varB));
+        return Math.max(-0.99, Math.min(0.99, corr)); // Clamp to valid range
+      }
+    }
+  }
+
+  // Priority 3: Industry-level defaults based on metric pair and industry
+  const metricA = (config.metric || "").toLowerCase();
+  const metricB = (config.secondMetric?.name || "").toLowerCase();
+  const industry = (config.targetIndustry || "").toLowerCase();
+
+  // Revenue-EBITDA correlation by industry
+  const isRevEBITDA = (metricA.includes("revenue") && metricB.includes("ebitda")) || (metricA.includes("ebitda") && metricB.includes("revenue"));
+  if (isRevEBITDA) {
+    if (industry.includes("software") || industry.includes("saas") || industry.includes("tech")) return 0.85;
+    if (industry.includes("pharma") || industry.includes("biotech")) return 0.50;
+    if (industry.includes("manufactur") || industry.includes("industrial")) return 0.70;
+    if (industry.includes("service") || industry.includes("consulting")) return 0.60;
+    if (industry.includes("healthcare")) return 0.65;
+    if (industry.includes("retail") || industry.includes("consumer")) return 0.72;
+    return 0.70; // Default for Revenue-EBITDA
+  }
+
+  // Revenue-Net Income typically lower correlation (tax, interest effects)
+  const isRevNI = (metricA.includes("revenue") && metricB.includes("net income")) || (metricA.includes("net income") && metricB.includes("revenue"));
+  if (isRevNI) return 0.55;
+
+  // EBITDA-Cash Flow
+  const isEBITDACF = (metricA.includes("ebitda") && metricB.includes("cash flow")) || (metricA.includes("cash flow") && metricB.includes("ebitda"));
+  if (isEBITDACF) return 0.80;
+
+  // Default for unknown metric pairs
+  return 0.60;
+};
+
 // ============================================================
 // PAYOFF STRUCTURES (per-period evaluation)
 // Now supports variant sub-types for each structure
@@ -383,12 +443,15 @@ const runMultiPeriodMC = (config) => {
     // Multi-metric
     isMultiMetric = false,
     secondMetric = null, // {currentValue, growthRate, volatility, threshold}
-    metricCorrelation = 0.5,
+    metricCorrelation: rawMetricCorrelation = 0.5,
     // Payment timing
     paymentDelay = 0, // Days after period end
     // Escrow
     isEscrowed = false,
   } = config;
+
+  // Estimate multi-metric correlation if not explicitly provided
+  const metricCorrelation = isMultiMetric ? estimateMetricCorrelation({ ...config, metricCorrelation: rawMetricCorrelation }) : rawMetricCorrelation;
 
   // ---- DISCOUNT RATE FRAMEWORK (per Appraisal Foundation VA-4 / GT methodology) ----
   // 
@@ -456,6 +519,7 @@ const runMultiPeriodMC = (config) => {
     let priorUnpaidPayoff = 0; // For adjust_payoff catch-up mechanism
     let excessCarryForward = 0;
     let accelerated = false;
+    let clawbackVoided = false; // Set true if acceleration voids clawback
     let clawbackAmount = 0;
     const periodPayoffs = [];
     const metricPath = [currentMetric]; // For tracking
@@ -514,7 +578,6 @@ const runMultiPeriodMC = (config) => {
               acceleratedPayoff += periods[rIdx].cap || periods[rIdx].fixedPayment || 0;
             }
           } else if (accType === "pay_pro_rata") {
-            // Pay based on current metric relative to remaining targets
             for (let rIdx = pIdx; rIdx < numPeriods; rIdx++) {
               acceleratedPayoff += evaluatePayoff(metricValue, periods[rIdx], metricPath, cumulativePayments, config);
             }
@@ -525,9 +588,16 @@ const runMultiPeriodMC = (config) => {
               acceleratedPayoff += evaluatePayoff(pm * (accelerationPercentile / 100), periods[rIdx], metricPath, cumulativePayments, config);
             }
           }
+          // Include accrued catch-up in acceleration if specified
+          if (config.accelerationIncludesCatchUp && hasCatchUp && priorUnpaidPayoff > 0) {
+            acceleratedPayoff += priorUnpaidPayoff;
+          }
           if (hasMultiYearCap) acceleratedPayoff = Math.min(acceleratedPayoff, multiYearCap - cumulativePayments);
           totalPayoff += acceleratedPayoff * Math.exp(-effectivePayoffDiscount * discountT);
+          cumulativePayments += acceleratedPayoff;
           periodPayoffs.push(acceleratedPayoff);
+          // If acceleration voids clawback, flag it so clawback evaluation is skipped
+          if (config.accelerationVoidsClawback) clawbackVoided = true;
           break;
         }
       }
@@ -646,8 +716,8 @@ const runMultiPeriodMC = (config) => {
     }
 
     // Clawback evaluation (at end of all periods)
-    // clawbackType: "terminal_cumulative" | "per_period" | "cumulative_shortfall" | "lookback"
-    if (hasClawback) {
+    // Skip if acceleration voided clawback rights
+    if (hasClawback && !clawbackVoided) {
       const clawbackType = config.clawbackType || "terminal_cumulative";
       let clawback = 0;
       let clawbackDiscountedValue = 0; // Track properly discounted clawback
@@ -783,7 +853,7 @@ const extractFromDocument = async (text, mode) => {
 CRITICAL: For each path-dependent feature, classify the SPECIFIC VARIANT TYPE from the disclosure language. Do not just return true/false.
 
 Return ONLY valid JSON, no markdown:
-{"earnouts":[{"name":"string","acquisitionDate":"string or null","maxPayout":number or null,"initialFairValue":number or null,"currentFairValue":number or null,"priorFairValue":number or null,"fairValueChange":number or null,"metric":"string or null","structure":"linear|binary|tiered|milestone|percentage|cagr|unknown","structureSubType":"string or null","threshold":number or null,"participationRate":number or null,"cap":number or null,"floor":number or null,"fixedPayment":number or null,"measurementPeriods":[{"year":number,"target":number or null,"label":"string"}],"hasCatchUp":boolean,"catchUpType":"carry_forward_payment|cumulative_target|threshold_adjustment|metric_carry_forward|null","hasClawback":boolean,"clawbackType":"terminal_cumulative|per_period|cumulative_shortfall|lookback|null","clawbackThreshold":number or null,"clawbackRate":number or null,"hasAcceleration":boolean,"accelerationType":"pay_maximum|pay_expected|pay_pro_rata|null","accelerationTrigger":"string or null","hasCumulativeTarget":boolean,"cumulativeTarget":number or null,"cumulativeTargetType":"all_or_nothing|pro_rata|excess_only|null","multiYearCap":number or null,"hasCarryForward":boolean,"binaryType":"standard|partial_credit|scaled|null","tieredType":"incremental|retroactive|null","linearType":"standard|retroactive|null","cagrType":"binary|linear_interpolation|tiered_cagr|null","milestoneType":"independent|sequential|compound|null","methodology":"Monte Carlo|probability-weighted|DCF|unknown","discountRate":number or null,"volatility":number or null,"riskFreeRate":number or null,"projectedMetric":number or null,"level3Rollforward":{"openingBalance":number or null,"additions":number or null,"fairValueChanges":number or null,"payments":number or null,"closingBalance":number or null},"confidenceScore":number,"provenance":{"volatilitySource":"string or null","discountRateSource":"string or null","projectionSource":"string or null","methodologyQuote":"string or null","level3DisclosureText":"string or null","comparableCompanies":["string"] or null,"referencedDocuments":["string"] or null}}],"reportingPeriod":"string","companyName":"string","filingType":"10-K|10-Q"}
+{"earnouts":[{"name":"string","acquisitionDate":"string or null","maxPayout":number or null,"initialFairValue":number or null,"currentFairValue":number or null,"priorFairValue":number or null,"fairValueChange":number or null,"metric":"string or null","structure":"linear|binary|tiered|milestone|percentage|cagr|unknown","structureSubType":"string or null","threshold":number or null,"participationRate":number or null,"cap":number or null,"floor":number or null,"fixedPayment":number or null,"measurementPeriods":[{"year":number,"target":number or null,"label":"string"}],"hasCatchUp":boolean,"catchUpType":"carry_forward_payment|cumulative_target|threshold_adjustment|metric_carry_forward|null","catchUpMechanism":"adjust_metric|adjust_payoff|null","hasClawback":boolean,"clawbackType":"terminal_cumulative|per_period|cumulative_shortfall|lookback|null","clawbackThreshold":number or null,"clawbackRate":number or null,"hasAcceleration":boolean,"accelerationType":"pay_maximum|pay_expected|pay_pro_rata|null","accelerationTrigger":"string or null","accelerationIncludesCatchUp":boolean,"accelerationVoidsClawback":boolean,"hasCumulativeTarget":boolean,"cumulativeTarget":number or null,"cumulativeTargetType":"all_or_nothing|pro_rata|excess_only|null","multiYearCap":number or null,"hasCarryForward":boolean,"binaryType":"standard|partial_credit|scaled|null","tieredType":"incremental|retroactive|null","linearType":"standard|retroactive|null","cagrType":"binary|linear_interpolation|tiered_cagr|null","milestoneType":"independent|sequential|compound|null","methodology":"Monte Carlo|probability-weighted|DCF|unknown","discountRate":number or null,"volatility":number or null,"riskFreeRate":number or null,"projectedMetric":number or null,"level3Rollforward":{"openingBalance":number or null,"additions":number or null,"fairValueChanges":number or null,"payments":number or null,"closingBalance":number or null},"confidenceScore":number,"provenance":{"volatilitySource":"string or null","discountRateSource":"string or null","projectionSource":"string or null","methodologyQuote":"string or null","level3DisclosureText":"string or null","comparableCompanies":["string"] or null,"referencedDocuments":["string"] or null}}],"reportingPeriod":"string","companyName":"string","filingType":"10-K|10-Q"}
 Extract EVERY earnout. Use null for undisclosed. For provenance: extract any text describing HOW assumptions were derived, comparable company names, external documents referenced, and methodology quotes.
 
 VARIANT TYPE GUIDE:
@@ -792,14 +862,17 @@ VARIANT TYPE GUIDE:
 - accelerationType: "pay_maximum" = full remaining max; "pay_expected" = probability-weighted; "pay_pro_rata" = based on metric at trigger
 - cumulativeTargetType: "all_or_nothing" = miss = forfeit all; "pro_rata" = proportional; "excess_only" = pay only if exceeded
 - binaryType: "standard" = threshold met = pay; "partial_credit" = proportional; "scaled" = tiered achievement
-- tieredType: "incremental" = each bracket to its range; "retroactive" = highest rate to all`,
+- tieredType: "incremental" = each bracket to its range; "retroactive" = highest rate to all
+- catchUpMechanism: "adjust_metric" = shortfall added to metric (binary); "adjust_payoff" = unpaid payoffs added directly (tiered)
+- accelerationIncludesCatchUp: true if acceleration clause includes accrued catch-up amounts
+- accelerationVoidsClawback: true if clawback rights terminate upon acceleration`,
 
     live_ppa: `You are a valuation report extraction specialist. Extract earnout terms AND their provenance from a PPA valuation report.
 
 CRITICAL: For each path-dependent feature, you must classify the SPECIFIC VARIANT TYPE by reading the actual agreement/report language. Do not just return true/false — identify HOW the mechanism works.
 
 Return ONLY valid JSON, no markdown:
-{"earnout":{"name":"string","metric":"string","metricDefinition":"string","structure":"linear|binary|tiered|milestone|percentage|cagr|multi-metric","structureSubType":"string or null","periods":[{"year":number,"yearFromNow":number,"threshold":number or null,"cap":number or null,"floor":number or null,"fixedPayment":number or null,"participationRate":number or null,"projectedMetric":number or null,"tiers":[{"lower":number,"upper":number,"rate":number}] or null,"linearType":"standard|retroactive|null","binaryType":"standard|partial_credit|scaled|null","tieredType":"incremental|retroactive|null","percentageType":"of_metric|of_excess|null","cagrType":"binary|linear_interpolation|tiered_cagr|null","milestoneType":"independent|sequential|compound|null","scaledTiers":[{"achievementPct":number,"payoutPct":number}] or null,"partialCreditFloor":number or null,"baseValue":number or null,"cagrTarget":number or null,"cagrFloor":number or null,"milestoneProbability":number or null,"milestones":[{"name":"string","probability":number,"payment":number}] or null}],"hasCatchUp":boolean,"catchUpType":"carry_forward_payment|cumulative_target|threshold_adjustment|metric_carry_forward|null","catchUpDescription":"string or null","hasClawback":boolean,"clawbackType":"terminal_cumulative|per_period|cumulative_shortfall|lookback|null","clawbackThreshold":number or null,"clawbackRate":number or null,"clawbackCap":number or null,"clawbackDescription":"string or null","hasAcceleration":boolean,"accelerationType":"pay_maximum|pay_expected|pay_pro_rata|null","accelerationTrigger":"string or null","accelerationDescription":"string or null","hasCumulativeTarget":boolean,"cumulativeTarget":number or null,"cumulativeTargetType":"all_or_nothing|pro_rata|excess_only|null","hasMultiYearCap":boolean,"multiYearCap":number or null,"hasCarryForward":boolean,"isMultiMetric":boolean,"secondMetric":{"name":"string","threshold":number,"currentValue":number,"growthRate":number,"volatility":number} or null,"metricCorrelation":number or null,"paymentTiming":"string","paymentDelay":number or null,"isEscrowed":boolean,"methodology":"Monte Carlo|probability-weighted|DCF","assumptions":{"currentMetric":number,"metricGrowthRate":number or null,"volatility":number,"discountRate":number,"riskFreeRate":number,"creditAdjustment":number or null,"comparableCompanies":["string"] or null},"initialFairValue":number or null,"currency":"string","confidenceScore":number,"ambiguities":["string"],"alternativeInterpretations":[{"clause":"string","interpretation1":"string","interpretation2":"string"}] or null,"provenance":{"volatility":{"value":number or null,"methodology":"string or null","comparableCompanies":[{"name":"string","ticker":"string or null","volatility":number or null}] or null,"deLeveringMethod":"string or null","dataDateRange":"string or null","sourceLocation":"string or null"},"discountRate":{"value":number or null,"methodology":"string or null","components":{"riskFreeRate":number or null,"equityRiskPremium":number or null,"sizePremium":number or null,"companySpecificRisk":number or null,"beta":number or null,"costOfDebt":number or null,"debtWeight":number or null,"equityWeight":number or null} or null,"sourceLocation":"string or null"},"projections":{"source":"string or null","forecastDate":"string or null","provider":"string or null","sourceLocation":"string or null"},"creditRisk":{"methodology":"string or null","acquirerRating":"string or null","sourceLocation":"string or null"},"referencedDocuments":["string"] or null,"methodologyQuote":"string or null"}}}
+{"earnout":{"name":"string","metric":"string","metricDefinition":"string","structure":"linear|binary|tiered|milestone|percentage|cagr|multi-metric","structureSubType":"string or null","periods":[{"year":number,"yearFromNow":number,"threshold":number or null,"cap":number or null,"floor":number or null,"fixedPayment":number or null,"participationRate":number or null,"projectedMetric":number or null,"tiers":[{"lower":number,"upper":number,"rate":number}] or null,"linearType":"standard|retroactive|null","binaryType":"standard|partial_credit|scaled|null","tieredType":"incremental|retroactive|null","percentageType":"of_metric|of_excess|null","cagrType":"binary|linear_interpolation|tiered_cagr|null","milestoneType":"independent|sequential|compound|null","scaledTiers":[{"achievementPct":number,"payoutPct":number}] or null,"partialCreditFloor":number or null,"baseValue":number or null,"cagrTarget":number or null,"cagrFloor":number or null,"milestoneProbability":number or null,"milestones":[{"name":"string","probability":number,"payment":number}] or null}],"hasCatchUp":boolean,"catchUpType":"carry_forward_payment|cumulative_target|threshold_adjustment|metric_carry_forward|null","catchUpDescription":"string or null","catchUpMechanism":"adjust_metric|adjust_payoff|null","hasClawback":boolean,"clawbackType":"terminal_cumulative|per_period|cumulative_shortfall|lookback|null","clawbackThreshold":number or null,"clawbackRate":number or null,"clawbackCap":number or null,"clawbackDescription":"string or null","hasAcceleration":boolean,"accelerationType":"pay_maximum|pay_expected|pay_pro_rata|null","accelerationTrigger":"string or null","accelerationDescription":"string or null","accelerationIncludesCatchUp":boolean,"accelerationVoidsClawback":boolean,"hasCumulativeTarget":boolean,"cumulativeTarget":number or null,"cumulativeTargetType":"all_or_nothing|pro_rata|excess_only|null","hasMultiYearCap":boolean,"multiYearCap":number or null,"hasCarryForward":boolean,"isMultiMetric":boolean,"secondMetric":{"name":"string","threshold":number,"currentValue":number,"growthRate":number,"volatility":number} or null,"metricCorrelation":number or null,"paymentTiming":"string","paymentDelay":number or null,"isEscrowed":boolean,"targetIndustry":"string or null","historicalMetricData":[{"metricA":number,"metricB":number}] or null,"methodology":"Monte Carlo|probability-weighted|DCF","assumptions":{"currentMetric":number,"metricGrowthRate":number or null,"volatility":number,"discountRate":number,"riskFreeRate":number,"creditAdjustment":number or null,"comparableCompanies":["string"] or null},"initialFairValue":number or null,"currency":"string","confidenceScore":number,"ambiguities":["string"],"alternativeInterpretations":[{"clause":"string","interpretation1":"string","interpretation2":"string"}] or null,"provenance":{"volatility":{"value":number or null,"methodology":"string or null","comparableCompanies":[{"name":"string","ticker":"string or null","volatility":number or null}] or null,"deLeveringMethod":"string or null","dataDateRange":"string or null","sourceLocation":"string or null"},"discountRate":{"value":number or null,"methodology":"string or null","components":{"riskFreeRate":number or null,"equityRiskPremium":number or null,"sizePremium":number or null,"companySpecificRisk":number or null,"beta":number or null,"costOfDebt":number or null,"debtWeight":number or null,"equityWeight":number or null} or null,"sourceLocation":"string or null"},"projections":{"source":"string or null","forecastDate":"string or null","provider":"string or null","sourceLocation":"string or null"},"creditRisk":{"methodology":"string or null","acquirerRating":"string or null","sourceLocation":"string or null"},"referencedDocuments":["string"] or null,"methodologyQuote":"string or null"}}}
 
 VARIANT TYPE CLASSIFICATION GUIDE:
 - catchUpType: "carry_forward_payment" = unpaid amounts roll forward; "cumulative_target" = single cumulative metric evaluated; "threshold_adjustment" = missed shortfall increases next threshold; "metric_carry_forward" = prior metric added to current
@@ -809,7 +882,12 @@ VARIANT TYPE CLASSIFICATION GUIDE:
 - binaryType: "standard" = threshold met = full pay; "partial_credit" = proportional to achievement; "scaled" = tiered achievement levels
 - tieredType: "incremental" = each bracket applies to its range only; "retroactive" = highest bracket rate applies to all
 - cagrType: "binary" = hit CAGR = fixed payment; "linear_interpolation" = scales between min/max CAGR; "tiered_cagr" = different payment per CAGR bracket
-- milestoneType: "independent" = each milestone separate; "sequential" = each conditional on prior; "compound" = all must be achieved`
+- milestoneType: "independent" = each milestone separate; "sequential" = each conditional on prior; "compound" = all must be achieved
+- catchUpMechanism: "adjust_metric" = shortfall added to metric before payoff evaluation (use for binary); "adjust_payoff" = prior unpaid payoffs added directly to payout (use for tiered/percentage)
+- accelerationIncludesCatchUp: true if the acceleration clause says accrued/unpaid catch-up amounts are included in the acceleration payment
+- accelerationVoidsClawback: true if the acceleration clause says clawback rights terminate upon acceleration
+- targetIndustry: the industry of the target/acquired company (e.g., "software", "healthcare", "manufacturing")
+- historicalMetricData: if multi-metric AND historical values for both metrics are available in the document, extract at least 3 periods as [{metricA: value, metricB: value}] for correlation estimation`
   };
 
   try {
@@ -1420,6 +1498,10 @@ export default function ValuProEarnout() {
   const [auditResponses, setAuditResponses] = useState(null);
   const [auditProcessing, setAuditProcessing] = useState(false);
 
+  // Probability sliders for milestone and acceleration (results page)
+  const [milestoneProb, setMilestoneProb] = useState(null); // null = use extracted value
+  const [accelerationProbSlider, setAccelerationProbSlider] = useState(null);
+
   const tc = theme === "dark";
   const c = {
     bg: tc ? "#0c1222" : "#f8f9fb", card: tc ? "#151e30" : "#ffffff", cardBorder: tc ? "#1e2d4a" : "#e5e7eb",
@@ -1472,9 +1554,10 @@ export default function ValuProEarnout() {
       np = { ...params, metric: e.metric || params.metric, currentMetric: e.projectedMetric || params.currentMetric,
         volatility: e.volatility || params.volatility, discountRate: e.discountRate || params.discountRate,
         riskFreeRate: e.riskFreeRate || params.riskFreeRate, periods: newPeriods,
-        hasCatchUp: e.hasCatchUp || false, catchUpType: e.catchUpType || null,
+        hasCatchUp: e.hasCatchUp || false, catchUpType: e.catchUpType || null, catchUpMechanism: e.catchUpMechanism || null,
         hasClawback: e.hasClawback || false, clawbackType: e.clawbackType || null, clawbackThreshold: e.clawbackThreshold || 0, clawbackRate: e.clawbackRate || 0,
         hasAcceleration: e.hasAcceleration || false, accelerationType: e.accelerationType || null,
+        accelerationIncludesCatchUp: e.accelerationIncludesCatchUp || false, accelerationVoidsClawback: e.accelerationVoidsClawback || false,
         hasCumulativeTarget: e.hasCumulativeTarget || false, cumulativeTarget: e.cumulativeTarget || 0, cumulativeTargetType: e.cumulativeTargetType || null,
         hasMultiYearCap: e.multiYearCap ? true : false, multiYearCap: e.multiYearCap || e.maxPayout || 15e6,
         hasCarryForward: e.hasCarryForward || false,
@@ -1500,14 +1583,16 @@ export default function ValuProEarnout() {
         metricGrowthRate: a.metricGrowthRate || params.metricGrowthRate, volatility: a.volatility || params.volatility,
         discountRate: a.discountRate || params.discountRate, riskFreeRate: a.riskFreeRate || params.riskFreeRate,
         creditAdj: a.creditAdjustment || params.creditAdj, periods: newPeriods,
-        hasCatchUp: e.hasCatchUp || false, catchUpType: e.catchUpType || null,
+        hasCatchUp: e.hasCatchUp || false, catchUpType: e.catchUpType || null, catchUpMechanism: e.catchUpMechanism || null,
         hasClawback: e.hasClawback || false, clawbackType: e.clawbackType || null,
         clawbackThreshold: e.clawbackThreshold || 0, clawbackRate: e.clawbackRate || 0, clawbackCap: e.clawbackCap || 0,
         hasAcceleration: e.hasAcceleration || false, accelerationType: e.accelerationType || null,
+        accelerationIncludesCatchUp: e.accelerationIncludesCatchUp || false, accelerationVoidsClawback: e.accelerationVoidsClawback || false,
         hasCumulativeTarget: e.hasCumulativeTarget || false, cumulativeTarget: e.cumulativeTarget || 0, cumulativeTargetType: e.cumulativeTargetType || null,
         hasMultiYearCap: e.hasMultiYearCap || false, multiYearCap: e.multiYearCap || 0,
         hasCarryForward: e.hasCarryForward || false,
         isMultiMetric: e.isMultiMetric || false, secondMetric: e.secondMetric || null,
+        metricCorrelation: e.metricCorrelation || null, targetIndustry: e.targetIndustry || null, historicalMetricData: e.historicalMetricData || null,
         isEscrowed: e.isEscrowed || false, paymentDelay: e.paymentDelay || 120,
       };
     }
@@ -2563,6 +2648,67 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
                 ))}
               </div>
             </div>
+
+            {/* Probability Sliders — only show if earnout has milestone or acceleration */}
+            {(params.periods.some(p => p.structure === "milestone") || params.hasAcceleration) && (
+              <div style={{ ...cardStyle, marginBottom: 14 }}>
+                <h3 style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, display: "flex", alignItems: "center", gap: 5 }}><Icon name="sliders" size={13} color={c.accent} /> Probability Sensitivity</h3>
+                <p style={{ fontSize: 10, color: c.textMuted, marginBottom: 12, lineHeight: 1.5 }}>Adjust probabilities to see how fair value responds. The engine re-computes using 10,000 paths for instant feedback.</p>
+
+                {params.periods.some(p => p.structure === "milestone") && (() => {
+                  const currentProb = milestoneProb ?? params.periods.find(p => p.structure === "milestone")?.milestoneProbability ?? 0.5;
+                  // Quick MC at this probability
+                  const quickParams = { ...params, periods: params.periods.map(p => p.structure === "milestone" ? { ...p, milestoneProbability: currentProb } : p), numPaths: 10000 };
+                  const quickResult = runMultiPeriodMC(quickParams);
+                  return (
+                    <div style={{ marginBottom: 14 }}>
+                      <div className="vf" style={{ justifyContent: "space-between", marginBottom: 4 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600 }}>Milestone Probability</span>
+                        <span style={{ fontSize: 13, fontWeight: 700, fontFamily: "'IBM Plex Mono',monospace", color: c.accent }}>{fmt(quickResult.fairValue)}</span>
+                      </div>
+                      <div className="vf" style={{ alignItems: "center", gap: 10 }}>
+                        <span style={{ fontSize: 10, color: c.textMuted, width: 28 }}>0%</span>
+                        <input type="range" min={0} max={100} step={5} value={Math.round(currentProb * 100)}
+                          onChange={e => setMilestoneProb(parseInt(e.target.value) / 100)}
+                          style={{ flex: 1, height: 6 }} />
+                        <span style={{ fontSize: 10, color: c.textMuted, width: 28 }}>100%</span>
+                      </div>
+                      <div style={{ textAlign: "center", fontSize: 12, fontWeight: 600, color: c.text, marginTop: 4 }}>{Math.round(currentProb * 100)}%</div>
+                      <div className="vf" style={{ justifyContent: "center", gap: 16, marginTop: 6, fontSize: 10, color: c.textMuted }}>
+                        <span>CI: {fmt(quickResult.ci95[0])} – {fmt(quickResult.ci95[1])}</span>
+                        <span>Prob Payoff: {quickResult.probPayoff}%</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {params.hasAcceleration && (() => {
+                  const currentProb = accelerationProbSlider ?? params.accelerationProb ?? 0.05;
+                  const quickParams = { ...params, accelerationProb: currentProb, numPaths: 10000 };
+                  const quickResult = runMultiPeriodMC(quickParams);
+                  return (
+                    <div>
+                      <div className="vf" style={{ justifyContent: "space-between", marginBottom: 4 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600 }}>Acceleration Probability (annual)</span>
+                        <span style={{ fontSize: 13, fontWeight: 700, fontFamily: "'IBM Plex Mono',monospace", color: c.accent }}>{fmt(quickResult.fairValue)}</span>
+                      </div>
+                      <div className="vf" style={{ alignItems: "center", gap: 10 }}>
+                        <span style={{ fontSize: 10, color: c.textMuted, width: 28 }}>0%</span>
+                        <input type="range" min={0} max={30} step={1} value={Math.round(currentProb * 100)}
+                          onChange={e => setAccelerationProbSlider(parseInt(e.target.value) / 100)}
+                          style={{ flex: 1, height: 6 }} />
+                        <span style={{ fontSize: 10, color: c.textMuted, width: 28 }}>30%</span>
+                      </div>
+                      <div style={{ textAlign: "center", fontSize: 12, fontWeight: 600, color: c.text, marginTop: 4 }}>{Math.round(currentProb * 100)}%</div>
+                      <div className="vf" style={{ justifyContent: "center", gap: 16, marginTop: 6, fontSize: 10, color: c.textMuted }}>
+                        <span>CI: {fmt(quickResult.ci95[0])} – {fmt(quickResult.ci95[1])}</span>
+                        <span>Without acceleration: {fmt(results.fairValue)}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
 
             {/* Methodology */}
             <div style={{ ...cardStyle, background: tc ? "rgba(37,99,235,0.03)" : "rgba(37,99,235,0.02)", borderColor: tc ? "rgba(37,99,235,0.1)" : "rgba(37,99,235,0.06)" }}>
