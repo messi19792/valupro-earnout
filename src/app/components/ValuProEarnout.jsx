@@ -848,13 +848,13 @@ const runSensitivity = (baseConfig, paramKey, range, steps = 12) => {
 // ============================================================
 const extractFromDocument = async (text, mode) => {
   const systemPrompts = {
-    backtest: `You are a financial data extraction specialist. Extract earnout/contingent consideration from SEC filings.
+    backtest: `You are a financial data extraction specialist. Extract earnout/contingent consideration terms from ANY financial document — this could be an SEC filing (10-K, 10-Q, 8-K), a merger/acquisition agreement (SPA, SHA), a purchase price allocation report, a term sheet, a board resolution, or any other document containing earnout terms. Adapt your extraction approach to the document format you receive.
 
-CRITICAL: For each path-dependent feature, classify the SPECIFIC VARIANT TYPE from the disclosure language. Do not just return true/false.
+CRITICAL: For each path-dependent feature, classify the SPECIFIC VARIANT TYPE from the document language. Do not just return true/false.
 
 Return ONLY valid JSON, no markdown:
 {"earnouts":[{"name":"string","acquisitionDate":"string or null","maxPayout":number or null,"initialFairValue":number or null,"currentFairValue":number or null,"priorFairValue":number or null,"fairValueChange":number or null,"metric":"string or null","structure":"linear|binary|tiered|milestone|percentage|cagr|unknown","structureSubType":"string or null","threshold":number or null,"participationRate":number or null,"cap":number or null,"floor":number or null,"fixedPayment":number or null,"measurementPeriods":[{"year":number,"target":number or null,"label":"string"}],"hasCatchUp":boolean,"catchUpType":"carry_forward_payment|cumulative_target|threshold_adjustment|metric_carry_forward|null","catchUpMechanism":"adjust_metric|adjust_payoff|null","hasClawback":boolean,"clawbackType":"terminal_cumulative|per_period|cumulative_shortfall|lookback|null","clawbackThreshold":number or null,"clawbackRate":number or null,"hasAcceleration":boolean,"accelerationType":"pay_maximum|pay_expected|pay_pro_rata|null","accelerationTrigger":"string or null","accelerationIncludesCatchUp":boolean,"accelerationVoidsClawback":boolean,"hasCumulativeTarget":boolean,"cumulativeTarget":number or null,"cumulativeTargetType":"all_or_nothing|pro_rata|excess_only|null","multiYearCap":number or null,"hasCarryForward":boolean,"binaryType":"standard|partial_credit|scaled|null","tieredType":"incremental|retroactive|null","linearType":"standard|retroactive|null","cagrType":"binary|linear_interpolation|tiered_cagr|null","milestoneType":"independent|sequential|compound|null","methodology":"Monte Carlo|probability-weighted|DCF|unknown","discountRate":number or null,"volatility":number or null,"riskFreeRate":number or null,"projectedMetric":number or null,"level3Rollforward":{"openingBalance":number or null,"additions":number or null,"fairValueChanges":number or null,"payments":number or null,"closingBalance":number or null},"confidenceScore":number,"provenance":{"volatilitySource":"string or null","discountRateSource":"string or null","projectionSource":"string or null","methodologyQuote":"string or null","level3DisclosureText":"string or null","comparableCompanies":["string"] or null,"referencedDocuments":["string"] or null}}],"reportingPeriod":"string","companyName":"string","filingType":"10-K|10-Q"}
-Extract EVERY earnout. Use null for undisclosed. For provenance: extract any text describing HOW assumptions were derived, comparable company names, external documents referenced, and methodology quotes.
+Extract EVERY earnout. Use null for undisclosed. For provenance: extract any text describing HOW assumptions were derived, comparable company names, external documents referenced, and methodology quotes. Adapt to whatever document format is provided — SEC filings, merger agreements, PPA reports, term sheets, or any other source.
 
 VARIANT TYPE GUIDE:
 - catchUpType: "carry_forward_payment" = unpaid amounts roll forward; "cumulative_target" = single cumulative metric; "threshold_adjustment" = shortfall increases next threshold
@@ -867,9 +867,9 @@ VARIANT TYPE GUIDE:
 - accelerationIncludesCatchUp: true if acceleration clause includes accrued catch-up amounts
 - accelerationVoidsClawback: true if clawback rights terminate upon acceleration`,
 
-    live_ppa: `You are a valuation report extraction specialist. Extract earnout terms AND their provenance from a PPA valuation report.
+    live_ppa: `You are a valuation and financial document extraction specialist. Extract earnout terms AND their provenance from ANY financial document — this could be a PPA valuation report, a merger/acquisition agreement (SPA, SHA, APA), a term sheet, an engagement letter, a draft agreement, auditor workpapers, or any other document containing earnout/contingent consideration terms. Adapt your extraction approach to the document format you receive.
 
-CRITICAL: For each path-dependent feature, you must classify the SPECIFIC VARIANT TYPE by reading the actual agreement/report language. Do not just return true/false — identify HOW the mechanism works.
+CRITICAL: For each path-dependent feature, you must classify the SPECIFIC VARIANT TYPE by reading the actual document language. Do not just return true/false — identify HOW the mechanism works.
 
 Return ONLY valid JSON, no markdown:
 {"earnout":{"name":"string","metric":"string","metricDefinition":"string","structure":"linear|binary|tiered|milestone|percentage|cagr|multi-metric","structureSubType":"string or null","periods":[{"year":number,"yearFromNow":number,"threshold":number or null,"cap":number or null,"floor":number or null,"fixedPayment":number or null,"participationRate":number or null,"projectedMetric":number or null,"tiers":[{"lower":number,"upper":number,"rate":number}] or null,"linearType":"standard|retroactive|null","binaryType":"standard|partial_credit|scaled|null","tieredType":"incremental|retroactive|null","percentageType":"of_metric|of_excess|null","cagrType":"binary|linear_interpolation|tiered_cagr|null","milestoneType":"independent|sequential|compound|null","scaledTiers":[{"achievementPct":number,"payoutPct":number}] or null,"partialCreditFloor":number or null,"baseValue":number or null,"cagrTarget":number or null,"cagrFloor":number or null,"milestoneProbability":number or null,"milestones":[{"name":"string","probability":number,"payment":number}] or null}],"hasCatchUp":boolean,"catchUpType":"carry_forward_payment|cumulative_target|threshold_adjustment|metric_carry_forward|null","catchUpDescription":"string or null","catchUpMechanism":"adjust_metric|adjust_payoff|null","hasClawback":boolean,"clawbackType":"terminal_cumulative|per_period|cumulative_shortfall|lookback|null","clawbackThreshold":number or null,"clawbackRate":number or null,"clawbackCap":number or null,"clawbackDescription":"string or null","hasAcceleration":boolean,"accelerationType":"pay_maximum|pay_expected|pay_pro_rata|null","accelerationTrigger":"string or null","accelerationDescription":"string or null","accelerationIncludesCatchUp":boolean,"accelerationVoidsClawback":boolean,"hasCumulativeTarget":boolean,"cumulativeTarget":number or null,"cumulativeTargetType":"all_or_nothing|pro_rata|excess_only|null","hasMultiYearCap":boolean,"multiYearCap":number or null,"hasCarryForward":boolean,"isMultiMetric":boolean,"secondMetric":{"name":"string","threshold":number,"currentValue":number,"growthRate":number,"volatility":number} or null,"metricCorrelation":number or null,"paymentTiming":"string","paymentDelay":number or null,"isEscrowed":boolean,"targetIndustry":"string or null","historicalMetricData":[{"metricA":number,"metricB":number}] or null,"methodology":"Monte Carlo|probability-weighted|DCF","assumptions":{"currentMetric":number,"metricGrowthRate":number or null,"volatility":number,"discountRate":number,"riskFreeRate":number,"creditAdjustment":number or null,"comparableCompanies":["string"] or null},"initialFairValue":number or null,"currency":"string","confidenceScore":number,"ambiguities":["string"],"alternativeInterpretations":[{"clause":"string","interpretation1":"string","interpretation2":"string"}] or null,"provenance":{"volatility":{"value":number or null,"methodology":"string or null","comparableCompanies":[{"name":"string","ticker":"string or null","volatility":number or null}] or null,"deLeveringMethod":"string or null","dataDateRange":"string or null","sourceLocation":"string or null"},"discountRate":{"value":number or null,"methodology":"string or null","components":{"riskFreeRate":number or null,"equityRiskPremium":number or null,"sizePremium":number or null,"companySpecificRisk":number or null,"beta":number or null,"costOfDebt":number or null,"debtWeight":number or null,"equityWeight":number or null} or null,"sourceLocation":"string or null"},"projections":{"source":"string or null","forecastDate":"string or null","provider":"string or null","sourceLocation":"string or null"},"creditRisk":{"methodology":"string or null","acquirerRating":"string or null","sourceLocation":"string or null"},"referencedDocuments":["string"] or null,"methodologyQuote":"string or null"}}}
@@ -1528,7 +1528,49 @@ export default function ValuProEarnout() {
 
   const handleFileUpload = (e) => {
     const nf = Array.from(e.target.files); setFiles(prev => [...prev, ...nf]);
-    nf.forEach(f => { const r = new FileReader(); r.onload = (ev) => setDocText(prev => prev + "\n" + ev.target.result); r.readAsText(f); });
+    nf.forEach(async (f) => {
+      const ext = f.name.split(".").pop().toLowerCase();
+      if (ext === "docx" || ext === "doc") {
+        try {
+          const mammoth = await import("mammoth");
+          const arrayBuffer = await f.arrayBuffer();
+          const result = await mammoth.extractRawText({ arrayBuffer });
+          setDocText(prev => prev + "\n" + result.value);
+        } catch (err) {
+          console.error("mammoth parse error:", err);
+          const r = new FileReader(); r.onload = (ev) => setDocText(prev => prev + "\n" + ev.target.result); r.readAsText(f);
+        }
+      } else if (ext === "pdf") {
+        try {
+          const arrayBuffer = await f.arrayBuffer();
+          // Load pdf.js from CDN
+          if (!window.pdfjsLib) {
+            await new Promise((resolve, reject) => {
+              const s = document.createElement("script");
+              s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+              s.onload = resolve; s.onerror = reject;
+              document.head.appendChild(s);
+            });
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+          }
+          const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          let fullText = "";
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            fullText += content.items.map(item => item.str).join(" ") + "\n";
+          }
+          setDocText(prev => prev + "\n" + fullText);
+        } catch (err) {
+          console.error("PDF parse error:", err);
+          // Fallback: read as text (won't work well but at least doesn't crash)
+          const r = new FileReader(); r.onload = (ev) => setDocText(prev => prev + "\n" + ev.target.result); r.readAsText(f);
+        }
+      } else {
+        // .txt, .csv, .html, .md — read as text
+        const r = new FileReader(); r.onload = (ev) => setDocText(prev => prev + "\n" + ev.target.result); r.readAsText(f);
+      }
+    });
   };
 
   const runPipeline = async () => {
