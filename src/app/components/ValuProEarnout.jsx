@@ -2360,12 +2360,22 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
     // ---- ENHANCED EditField with inline diagnostics + provenance ----
     const EditField = ({ label, value, onChange, type = "number", step, format, fieldKey, periodIdx, tooltip }) => {
       const [showDiag, setShowDiag] = useState(false);
+      const [localVal, setLocalVal] = useState(null); // null = use prop value
       const diag = getDiag(fieldKey, value);
       const isIssue = diag.status === "missing" || diag.status === "warning";
       const statusColor = diag.status === "missing" ? c.danger : diag.status === "warning" ? c.warning : diag.status === "info" ? c.accent : c.success;
       const statusIcon = diag.status === "missing" ? "alert" : diag.status === "warning" ? "alert" : diag.status === "info" ? "info" : "check";
       const isDefaultValue = diag.message && diag.message.includes("platform default");
       const statusLabel = diag.status === "missing" ? "Not Found" : isDefaultValue ? "Default" : diag.status === "warning" ? "Review" : diag.status === "info" ? "Note" : "Extracted";
+
+      // Display value: when user is editing (localVal !== null), show their text; otherwise format from prop
+      const displayVal = localVal !== null ? localVal : (format === "percent" ? ((value || 0) * 100).toFixed(1) : (value ?? ""));
+
+      const commitValue = (raw) => {
+        const v = parseFloat(raw);
+        if (!isNaN(v)) onChange(format === "percent" ? v / 100 : v);
+        setLocalVal(null); // Reset to prop-driven display
+      };
 
       // Get provenance for this field
       const fieldProv = fieldKey === "volatility" ? provenance.volatility : fieldKey === "discountRate" ? provenance.discountRate : fieldKey === "metricGrowthRate" || fieldKey === "projectedMetric" ? provenance.projections : fieldKey === "creditAdj" ? provenance.creditRisk : null;
@@ -2385,8 +2395,11 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
               </button>
             </div>
           </div>
-          <input type={type} value={format === "percent" ? ((value || 0) * 100).toFixed(1) : value || ""} step={step}
-            onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) onChange(format === "percent" ? v / 100 : v); }}
+          <input type="text" inputMode="decimal" value={displayVal} step={step}
+            onFocus={() => setLocalVal(format === "percent" ? ((value || 0) * 100).toFixed(1) : String(value ?? ""))}
+            onChange={e => setLocalVal(e.target.value)}
+            onBlur={e => commitValue(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") { commitValue(e.target.value); e.target.blur(); } }}
             style={{ width: "100%", padding: "6px 10px", fontSize: 12, fontFamily: "'IBM Plex Mono',monospace", border: `1.5px solid ${isIssue ? statusColor : c.cardBorder}`, borderRadius: 6, background: isIssue ? `${statusColor}06` : c.inputBg, color: c.text, outline: "none", textAlign: "right" }} />
           
           {/* Expandable diagnostics + provenance panel */}
