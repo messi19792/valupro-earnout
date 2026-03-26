@@ -2248,62 +2248,75 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
 
     const getDiag = (field, value) => {
       const missing = value === null || value === undefined || value === 0;
+      // Check if this field was actually extracted from the document vs using defaults
+      const extractedAssumptions = mode === "live" ? extractedData?.earnout?.assumptions : extractedData?.earnouts?.[0];
+      const wasExtracted = (f) => {
+        if (isGT) return true; // GT demo: everything is "extracted"
+        if (!extractedAssumptions) return false;
+        const fieldMap = { volatility: "volatility", discountRate: "discountRate", riskFreeRate: "riskFreeRate", creditAdj: "creditAdjustment", metricGrowthRate: "metricGrowthRate", currentMetric: "currentMetric" };
+        const key = fieldMap[f] || f;
+        return extractedAssumptions[key] != null && extractedAssumptions[key] !== 0;
+      };
+      const isDefault = !missing && !wasExtracted(field) && !isGT;
       const diags = {
         currentMetric: {
-          status: missing ? "missing" : "ok",
-          message: missing ? "Current metric value not found in the document." : (isGT ? "FY18 base EBITDA from GT example." : isBT ? "Extracted from most recent period actuals in the filing." : "Extracted from PPA report or management forecast."),
-          suggestion: missing ? "Use the most recent trailing twelve months (TTM) actual. For EBITDA, this should be adjusted EBITDA consistent with the earnout definition." : null,
+          status: missing ? "missing" : isDefault ? "warning" : "ok",
+          message: missing ? "Current metric value not found in the document." : isDefault ? "Not found in the document — using platform default. You should enter the actual trailing twelve months (TTM) metric." : (isGT ? "FY18 base EBITDA from GT example." : isBT ? "Extracted from most recent period actuals in the filing." : "Extracted from PPA report or management forecast."),
+          suggestion: missing || isDefault ? "Use the most recent trailing twelve months (TTM) actual. For EBITDA, this should be adjusted EBITDA consistent with the earnout definition." : null,
           impact: "The current metric anchors the growth projection. A 10% error here flows through to all period projections.",
-          resolution: missing ? "Check the acquisition closing financials or latest management reporting package." : null,
+          resolution: missing || isDefault ? "Check the acquisition closing financials or latest management reporting package." : null,
         },
         volatility: {
-          status: missing ? "missing" : value < 0.15 ? "warning" : value > 0.65 ? "warning" : "ok",
+          status: missing ? "missing" : isDefault ? "warning" : value < 0.15 ? "warning" : value > 0.65 ? "warning" : "ok",
           message: missing ? "Volatility not disclosed in the document."
             : isGT ? "GT example states 40% EBITDA volatility derived from comparable company equity volatility."
+            : isDefault ? "Not found in the document — using platform default of 40%. You should replace this with a deal-specific value."
             : isBT ? "SEC filings rarely disclose volatility directly. This may be a default value."
             : (value && !missing) ? "Extracted from PPA report comparable company analysis." : "Could not extract — the report may reference 'comparable company analysis' without stating the figure.",
-          suggestion: missing ? `Suggested: ${params.metric?.includes("Revenue") ? "15%–25%" : "30%–45%"} based on typical ${params.metric?.includes("Revenue") ? "revenue" : "EBITDA"} volatility for mid-market targets. EBITDA volatility is typically 1.5–2.5× revenue volatility due to operational leverage.`
+          suggestion: missing || isDefault ? `Suggested: ${params.metric?.includes("Revenue") ? "15%–25%" : "30%–45%"} based on typical ${params.metric?.includes("Revenue") ? "revenue" : "EBITDA"} volatility for mid-market targets. EBITDA volatility is typically 1.5–2.5× revenue volatility due to operational leverage.`
             : value < 0.15 ? "This seems low. EBITDA volatility below 15% is unusual — even stable businesses typically show 20%+. Verify against comparable company data."
             : value > 0.65 ? "This is very high. Volatility above 65% is typical only for early-stage or biotech companies. Verify this reflects the metric, not equity volatility."
             : null,
           impact: `Volatility is the most sensitive input for ${params.periods[0]?.structure === "binary" ? "binary" : "threshold-based"} earnouts. A 5% change in volatility can move fair value by 10–15%.`,
-          resolution: missing ? "Upload the comparable company analysis exhibit, or check Kroll Cost of Capital Navigator / Duff & Phelps Valuation Handbook for industry volatility benchmarks." : null,
+          resolution: missing || isDefault ? "Upload the comparable company analysis exhibit, or check Kroll Cost of Capital Navigator / Duff & Phelps Valuation Handbook for industry volatility benchmarks." : null,
         },
         discountRate: {
-          status: missing ? "missing" : value < 0.06 ? "warning" : value > 0.20 ? "warning" : "ok",
+          status: missing ? "missing" : isDefault ? "warning" : value < 0.06 ? "warning" : value > 0.20 ? "warning" : "ok",
           message: missing ? "Metric discount rate not found. This is the required return for the metric's cash flows (typically WACC-based)."
             : isGT ? "GT states 10.0% EBITDA discount rate."
+            : isDefault ? "Not found in the document — using platform default of 12%. Should be consistent with the WACC from the PPA."
             : "Extracted from report. Verify this represents the metric-specific discount rate, not the earnout payoff discount rate.",
-          suggestion: missing ? `Suggested: 8%–14% for ${params.metric?.includes("Revenue") ? "revenue (typically lower risk premium than EBITDA)" : "EBITDA"}. Should be consistent with the WACC used in the PPA business enterprise valuation.`
+          suggestion: missing || isDefault ? `Suggested: 8%–14% for ${params.metric?.includes("Revenue") ? "revenue (typically lower risk premium than EBITDA)" : "EBITDA"}. Should be consistent with the WACC used in the PPA business enterprise valuation.`
             : value < 0.06 ? "Below 6% is unusually low for a metric discount rate — this may be the risk-free rate or payoff discount rate, not the metric rate."
             : value > 0.20 ? "Above 20% implies very high risk. Verify this isn't a blended rate that already includes credit risk."
             : null,
           impact: "The metric discount rate determines the risk premium used to convert management's projections to risk-neutral. Higher rate = lower risk-neutral metric = lower probability of hitting thresholds.",
-          resolution: missing ? "Check the PPA report's DCF / business enterprise valuation for the WACC, or the earnout methodology section for the 'required metric risk premium' (RMRP)." : null,
+          resolution: missing || isDefault ? "Check the PPA report's DCF / business enterprise valuation for the WACC, or the earnout methodology section for the 'required metric risk premium' (RMRP)." : null,
         },
         riskFreeRate: {
-          status: missing ? "missing" : "ok",
-          message: isGT ? "Approximated at 2.5% reflecting 2018 US Treasury rates." : "Risk-free rate matching the weighted-average earnout duration.",
-          suggestion: missing ? `Suggested: Use the US Treasury yield matching the earnout's weighted-average duration. For a ${params.periods.length}-year earnout, use the ${params.periods.length}-year Treasury rate.` : null,
+          status: missing ? "missing" : isDefault ? "warning" : "ok",
+          message: isGT ? "Approximated at 2.5% reflecting 2018 US Treasury rates." : isDefault ? "Not found in the document — using platform default of 4.3%. Should match the US Treasury yield for the earnout duration." : "Risk-free rate matching the weighted-average earnout duration.",
+          suggestion: missing || isDefault ? `Suggested: Use the US Treasury yield matching the earnout's weighted-average duration. For a ${params.periods.length}-year earnout, use the ${params.periods.length}-year Treasury rate.` : null,
           impact: "Moderate. Affects both the risk-neutral drift and the payoff discount rate, but changes of 50bps have a relatively small impact.",
-          resolution: missing ? "Check the Federal Reserve's H.15 release for current Treasury yields, or the PPA report's risk-free rate assumption." : null,
+          resolution: missing || isDefault ? "Check the Federal Reserve's H.15 release for current Treasury yields, or the PPA report's risk-free rate assumption." : null,
         },
         creditAdj: {
-          status: params.isEscrowed ? "info" : missing ? "warning" : "ok",
+          status: params.isEscrowed ? "info" : missing ? "warning" : isDefault ? "warning" : "ok",
           message: params.isEscrowed ? "Credit adjustment is zero because earnout funds are held in escrow." 
             : missing ? "Credit risk adjustment not stated. Since funds are NOT escrowed, counterparty credit risk should be reflected."
             : isGT ? "Implied at 2.0% (risk-adjusted rate 4.5% = Rf 2.5% + credit 2.0%)."
+            : isDefault ? "Not found in the document — using platform default of 1.0%. Adjust based on acquirer's credit profile."
             : "Extracted from report.",
-          suggestion: params.isEscrowed ? null : missing ? "Suggested: 1%–3% for investment-grade acquirers, 3%–5% for non-investment-grade. Check the acquirer's credit profile or debt spreads." : null,
+          suggestion: params.isEscrowed ? null : (missing || isDefault) ? "Suggested: 1%–3% for investment-grade acquirers, 3%–5% for non-investment-grade. Check the acquirer's credit profile or debt spreads." : null,
           impact: params.isEscrowed ? "None — escrowed funds eliminate counterparty risk." : "Directly increases the payoff discount rate, reducing the present value of all future payments.",
-          resolution: missing && !params.isEscrowed ? "Review the acquirer's credit rating or recent debt issuance spreads. If the merger agreement provides for escrow, toggle the 'Escrowed' feature." : null,
+          resolution: (missing || isDefault) && !params.isEscrowed ? "Review the acquirer's credit rating or recent debt issuance spreads. If the merger agreement provides for escrow, toggle the 'Escrowed' feature." : null,
         },
         metricGrowthRate: {
-          status: missing ? "warning" : "ok",
-          message: missing ? "Growth rate not explicitly stated." : isGT ? "Implied ~12% CAGR from management projections ($12M → $17M over 3 years)." : "Derived from management projections.",
-          suggestion: missing ? "Calculate from the projected metrics: if Current = $15M and Year 3 Projected = $20M, growth rate = (20/15)^(1/3) - 1 ≈ 10%." : null,
+          status: missing ? "warning" : isDefault ? "warning" : "ok",
+          message: missing ? "Growth rate not explicitly stated." : isGT ? "Implied ~12% CAGR from management projections ($12M → $17M over 3 years)." : isDefault ? "Not found in the document — using platform default of 8%. Derive from management projections if available." : "Derived from management projections.",
+          suggestion: missing || isDefault ? "Calculate from the projected metrics: if Current = $15M and Year 3 Projected = $20M, growth rate = (20/15)^(1/3) - 1 ≈ 10%." : null,
           impact: "Growth rate affects the risk-neutral drift. Combined with the metric discount rate, it determines whether the simulated metric trends above or below thresholds.",
-          resolution: missing ? "Use the management forecast or budget projections for the earnout metric." : null,
+          resolution: missing || isDefault ? "Use the management forecast or budget projections for the earnout metric." : null,
         },
       };
 
@@ -2337,7 +2350,8 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
       const isIssue = diag.status === "missing" || diag.status === "warning";
       const statusColor = diag.status === "missing" ? c.danger : diag.status === "warning" ? c.warning : diag.status === "info" ? c.accent : c.success;
       const statusIcon = diag.status === "missing" ? "alert" : diag.status === "warning" ? "alert" : diag.status === "info" ? "info" : "check";
-      const statusLabel = diag.status === "missing" ? "Not Found" : diag.status === "warning" ? "Review" : diag.status === "info" ? "Note" : "Extracted";
+      const isDefaultValue = diag.message && diag.message.includes("platform default");
+      const statusLabel = diag.status === "missing" ? "Not Found" : isDefaultValue ? "Default" : diag.status === "warning" ? "Review" : diag.status === "info" ? "Note" : "Extracted";
 
       // Get provenance for this field
       const fieldProv = fieldKey === "volatility" ? provenance.volatility : fieldKey === "discountRate" ? provenance.discountRate : fieldKey === "metricGrowthRate" || fieldKey === "projectedMetric" ? provenance.projections : fieldKey === "creditAdj" ? provenance.creditRisk : null;
@@ -2563,7 +2577,7 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
                         <EditField label="Fixed Payment ($)" value={p.fixedPayment || 0} onChange={v => updatePeriod(i, "fixedPayment", v)} step={100000} fieldKey="fixedPayment" />
                       )}
                       {(p.structure === "linear" || p.structure === "percentage") && (
-                        <EditField label="Participation Rate" value={p.participationRate || 0} onChange={v => updatePeriod(i, "participationRate", v)} step={0.01} format="percent" fieldKey="participationRate" />
+                        <EditField label="Participation Rate" value={p.participationRate || 0} onChange={v => updatePeriod(i, "participationRate", v)} step={0.01} fieldKey="participationRate" tooltip="Dollar multiplier (e.g., 2.5 = $2.50 per $1 of excess) or percentage (e.g., 0.10 = 10%)" />
                       )}
                       <EditField label="Cap ($)" value={p.cap || 0} onChange={v => updatePeriod(i, "cap", v)} step={100000} fieldKey="cap" />
                     </div>
