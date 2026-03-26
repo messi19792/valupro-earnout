@@ -2580,6 +2580,9 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
                         <EditField label="Participation Rate" value={p.participationRate || 0} onChange={v => updatePeriod(i, "participationRate", v)} step={0.01} fieldKey="participationRate" tooltip="Dollar multiplier (e.g., 2.5 = $2.50 per $1 of excess) or percentage (e.g., 0.10 = 10%)" />
                       )}
                       <EditField label="Cap ($)" value={p.cap || 0} onChange={v => updatePeriod(i, "cap", v)} step={100000} fieldKey="cap" />
+                      {(p.floor > 0 || p.structure === "linear") && (
+                        <EditField label="Floor / Min Guarantee ($)" value={p.floor || 0} onChange={v => updatePeriod(i, "floor", v)} step={100000} fieldKey="floor" tooltip="Minimum payment regardless of metric performance (e.g., minimum guarantee)" />
+                      )}
                     </div>
                   </div>
                 ))}
