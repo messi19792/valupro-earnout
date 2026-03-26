@@ -923,7 +923,15 @@ const verifyExtraction = async (text, extracted) => {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
       body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 2048,
-        system: `Verify extracted earnout terms. Return ONLY JSON: {"verified":boolean,"errors":[{"field":"string","issue":"string"}],"missingTerms":[{"term":"string"}],"overallConfidence":number,"recommendation":"proceed|review_needed|high_risk"}`,
+        system: `Verify extracted earnout terms against the source document. Check for mismatches, missing fields, and structural issues.
+
+Return ONLY JSON: {"verified":boolean,"errors":[{"field":"string","issue":"string","userAction":"string","severity":"critical|warning|info"}],"missingTerms":[{"term":"string","userAction":"string"}],"overallConfidence":number,"recommendation":"proceed|review_needed|high_risk"}
+
+CRITICAL RULES FOR ERROR MESSAGES:
+- "field" should be a human-readable label like "Earnout Structure", "Catch-Up Type", "Projected Metric", NOT JSON paths like "earnouts[1].milestoneType"
+- "issue" should explain the problem in plain English that a VP Finance would understand
+- "userAction" should be a specific instruction like "Change the structure dropdown from Binary to Milestone on Period 1" or "Set the Cumulative Target to $70M and enable the Cumulative Target toggle"
+- "severity": "critical" = will produce wrong fair value, "warning" = may affect accuracy, "info" = minor observation`,
         messages: [{ role: "user", content: `Document:\n${text.substring(0, 40000)}\n\nExtracted:\n${JSON.stringify(extracted, null, 2)}\n\nVerify.` }] })
     });
     const data = await response.json();
@@ -2602,11 +2610,43 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
             </div>
           </div>
 
-          {/* Verification warnings from extraction */}
+          {/* Verification warnings — user-friendly actionable guidance */}
           {verification?.errors?.length > 0 && (
-            <div style={{ ...cardStyle, marginBottom: 12, padding: 14, borderColor: "rgba(220,38,38,0.15)", background: "rgba(220,38,38,0.02)" }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: c.danger, marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}><Icon name="alert" size={13} color={c.danger} /> Extraction Issues</div>
-              {verification.errors.map((err, i) => <div key={i} style={{ fontSize: 11, color: c.textMuted, marginBottom: 2 }}>• <strong>{err.field}:</strong> {err.issue}</div>)}
+            <div style={{ ...cardStyle, marginBottom: 12, padding: 14, borderColor: "rgba(220,38,38,0.15)", background: tc ? "rgba(220,38,38,0.04)" : "rgba(220,38,38,0.02)" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: c.danger, marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}><Icon name="alert" size={14} color={c.danger} /> Review Before Running</div>
+              <p style={{ fontSize: 10, color: c.textMuted, marginBottom: 10, lineHeight: 1.5 }}>The AI verifier flagged potential issues with the extraction. Review each item and make corrections on this page before running the Monte Carlo.</p>
+              {verification.errors.map((err, i) => {
+                const sevColor = err.severity === "critical" ? c.danger : err.severity === "warning" ? c.warning : c.accent;
+                const sevLabel = err.severity === "critical" ? "Fix Required" : err.severity === "warning" ? "Review" : "Note";
+                return (
+                  <div key={i} style={{ marginBottom: 8, padding: "8px 10px", background: tc ? "rgba(255,255,255,0.02)" : "rgba(0,0,0,0.01)", borderRadius: 6, borderLeft: `3px solid ${sevColor}` }}>
+                    <div className="vf" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: c.text }}>{err.field || "Extraction"}</span>
+                      <span style={{ fontSize: 8, padding: "1px 5px", borderRadius: 3, background: `${sevColor}15`, color: sevColor, fontWeight: 600 }}>{sevLabel}</span>
+                    </div>
+                    <div style={{ fontSize: 10, color: c.textMuted, lineHeight: 1.5, marginBottom: err.userAction ? 4 : 0 }}>{err.issue}</div>
+                    {err.userAction && (
+                      <div style={{ fontSize: 10, color: c.accent, fontWeight: 500, display: "flex", alignItems: "flex-start", gap: 4 }}>
+                        <Icon name="arrowRight" size={10} color={c.accent} style={{ marginTop: 2, flexShrink: 0 }} />
+                        <span>{err.userAction}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Missing terms */}
+          {verification?.missingTerms?.length > 0 && (
+            <div style={{ ...cardStyle, marginBottom: 12, padding: 14, borderColor: "rgba(217,119,6,0.15)", background: tc ? "rgba(217,119,6,0.04)" : "rgba(217,119,6,0.02)" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: c.warning, marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}><Icon name="info" size={13} color={c.warning} /> Missing Information</div>
+              {verification.missingTerms.map((mt, i) => (
+                <div key={i} style={{ fontSize: 10, color: c.textMuted, marginBottom: 3, display: "flex", gap: 4 }}>
+                  <span>•</span>
+                  <span><strong>{mt.term}:</strong> {mt.userAction || "Not found in the document. Enter manually if available."}</span>
+                </div>
+              ))}
             </div>
           )}
 
