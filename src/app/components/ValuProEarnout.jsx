@@ -1362,7 +1362,7 @@ ${periodNarrative}
 // ============================================================
 // FORMATTING
 // ============================================================
-const fmt = (n, d = 0) => { if (n == null || isNaN(n)) return "—"; if (Math.abs(n) >= 1e9) return `$${(n / 1e9).toFixed(2)}B`; if (Math.abs(n) >= 1e6) return `$${(n / 1e6).toFixed(2)}M`; if (Math.abs(n) >= 1e3) return `$${(n / 1e3).toFixed(1)}K`; return `$${n.toFixed(d)}`; };
+const fmt = (n, d = 0) => { if (n == null || isNaN(n)) return "—"; if (Math.abs(n) >= 1e9) return `$${(n / 1e9).toFixed(2)}B`; if (Math.abs(n) >= 1e6) return `$${(n / 1e6).toFixed(2)}M`; if (Math.abs(n) >= 1e3) return `$${(n / 1e3).toFixed(1)}K`; if (Math.abs(n) >= 1) return `$${n.toFixed(0)}`; return `$${n.toFixed(2)}`; };
 const fmtPct = (n) => n == null ? "—" : `${(n * 100).toFixed(1)}%`;
 
 // ============================================================
@@ -1767,6 +1767,7 @@ export default function ValuProEarnout() {
   const runFromReview = () => {
     setView("processing"); setProgress(0);
     setStage(`Running Monte Carlo (${MC_PATHS.toLocaleString()} paths)...`); setProgress(60);
+    console.log("MC params:", JSON.stringify({ periods: params.periods.map(p => ({ structure: p.structure, threshold: p.threshold, participationRate: p.participationRate, cap: p.cap, floor: p.floor, projectedMetric: p.projectedMetric })), volatility: params.volatility, discountRate: params.discountRate, riskFreeRate: params.riskFreeRate, currentMetric: params.currentMetric, multiYearCap: params.multiYearCap, hasMultiYearCap: params.hasMultiYearCap }, null, 2));
     setTimeout(() => {
       const res = runMultiPeriodMC(params);
       setResults(res);
