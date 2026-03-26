@@ -856,6 +856,13 @@ Return ONLY valid JSON, no markdown:
 {"earnouts":[{"name":"string","acquisitionDate":"string or null","maxPayout":number or null,"initialFairValue":number or null,"currentFairValue":number or null,"priorFairValue":number or null,"fairValueChange":number or null,"metric":"string or null","structure":"linear|binary|tiered|milestone|percentage|cagr|unknown","structureSubType":"string or null","threshold":number or null,"participationRate":number or null,"cap":number or null,"floor":number or null,"fixedPayment":number or null,"measurementPeriods":[{"year":number,"target":number or null,"label":"string"}],"hasCatchUp":boolean,"catchUpType":"carry_forward_payment|cumulative_target|threshold_adjustment|metric_carry_forward|null","catchUpMechanism":"adjust_metric|adjust_payoff|null","hasClawback":boolean,"clawbackType":"terminal_cumulative|per_period|cumulative_shortfall|lookback|null","clawbackThreshold":number or null,"clawbackRate":number or null,"hasAcceleration":boolean,"accelerationType":"pay_maximum|pay_expected|pay_pro_rata|null","accelerationTrigger":"string or null","accelerationIncludesCatchUp":boolean,"accelerationVoidsClawback":boolean,"hasCumulativeTarget":boolean,"cumulativeTarget":number or null,"cumulativeTargetType":"all_or_nothing|pro_rata|excess_only|null","multiYearCap":number or null,"hasCarryForward":boolean,"binaryType":"standard|partial_credit|scaled|null","tieredType":"incremental|retroactive|null","linearType":"standard|retroactive|null","cagrType":"binary|linear_interpolation|tiered_cagr|null","milestoneType":"independent|sequential|compound|null","methodology":"Monte Carlo|probability-weighted|DCF|unknown","discountRate":number or null,"volatility":number or null,"riskFreeRate":number or null,"projectedMetric":number or null,"level3Rollforward":{"openingBalance":number or null,"additions":number or null,"fairValueChanges":number or null,"payments":number or null,"closingBalance":number or null},"confidenceScore":number,"provenance":{"volatilitySource":"string or null","discountRateSource":"string or null","projectionSource":"string or null","methodologyQuote":"string or null","level3DisclosureText":"string or null","comparableCompanies":["string"] or null,"referencedDocuments":["string"] or null}}],"reportingPeriod":"string","companyName":"string","filingType":"10-K|10-Q"}
 Extract EVERY earnout. Use null for undisclosed. For provenance: extract any text describing HOW assumptions were derived, comparable company names, external documents referenced, and methodology quotes. Adapt to whatever document format is provided — SEC filings, merger agreements, PPA reports, term sheets, or any other source.
 
+CRITICAL INFERENCE RULES (apply when values are not explicitly stated):
+1. currentMetric: If not stated, infer from context. If Year 1 target is $30M and metric is ARR, current ARR is likely $22-28M (15-25% growth implied). Set projectedMetric for each period to the target × 1.05 (management typically expects to slightly exceed targets).
+2. For each measurementPeriod, set "projectedMetric" to the target value × 1.05 if not explicitly stated — do NOT leave it null.
+3. For catch-up provisions: distinguish between (a) "carry_forward_payment" = missed payment rolls to next period, (b) "cumulative_target" = cumulative metric across periods triggers catch-up, (c) "conditional_makeup" = specific condition (like Year 1 miss + cumulative threshold) triggers a makeup payment. For (c), use catchUpType="cumulative_target" with the cumulative threshold in cumulativeTarget, and set the catch-up payment as a SEPARATE value.
+4. fixedPayment should be set PER PERIOD, not as total. If document says "$5M per year" with 2 years, fixedPayment = 5000000 (not 10000000).
+5. maxPayout should be the TOTAL maximum across all periods. If "$5M per year × 3 years", maxPayout = 15000000.
+
 VARIANT TYPE GUIDE:
 - catchUpType: "carry_forward_payment" = unpaid amounts roll forward; "cumulative_target" = single cumulative metric; "threshold_adjustment" = shortfall increases next threshold
 - clawbackType: "terminal_cumulative" = evaluated at end; "per_period" = each period independent; "cumulative_shortfall" = proportional to gap; "lookback" = any period below floor
@@ -873,6 +880,14 @@ CRITICAL: For each path-dependent feature, you must classify the SPECIFIC VARIAN
 
 Return ONLY valid JSON, no markdown:
 {"earnout":{"name":"string","metric":"string","metricDefinition":"string","structure":"linear|binary|tiered|milestone|percentage|cagr|multi-metric","structureSubType":"string or null","periods":[{"year":number,"yearFromNow":number,"threshold":number or null,"cap":number or null,"floor":number or null,"fixedPayment":number or null,"participationRate":number or null,"projectedMetric":number or null,"tiers":[{"lower":number,"upper":number,"rate":number}] or null,"linearType":"standard|retroactive|null","binaryType":"standard|partial_credit|scaled|null","tieredType":"incremental|retroactive|null","percentageType":"of_metric|of_excess|null","cagrType":"binary|linear_interpolation|tiered_cagr|null","milestoneType":"independent|sequential|compound|null","scaledTiers":[{"achievementPct":number,"payoutPct":number}] or null,"partialCreditFloor":number or null,"baseValue":number or null,"cagrTarget":number or null,"cagrFloor":number or null,"milestoneProbability":number or null,"milestones":[{"name":"string","probability":number,"payment":number}] or null}],"hasCatchUp":boolean,"catchUpType":"carry_forward_payment|cumulative_target|threshold_adjustment|metric_carry_forward|null","catchUpDescription":"string or null","catchUpMechanism":"adjust_metric|adjust_payoff|null","hasClawback":boolean,"clawbackType":"terminal_cumulative|per_period|cumulative_shortfall|lookback|null","clawbackThreshold":number or null,"clawbackRate":number or null,"clawbackCap":number or null,"clawbackDescription":"string or null","hasAcceleration":boolean,"accelerationType":"pay_maximum|pay_expected|pay_pro_rata|null","accelerationTrigger":"string or null","accelerationDescription":"string or null","accelerationIncludesCatchUp":boolean,"accelerationVoidsClawback":boolean,"hasCumulativeTarget":boolean,"cumulativeTarget":number or null,"cumulativeTargetType":"all_or_nothing|pro_rata|excess_only|null","hasMultiYearCap":boolean,"multiYearCap":number or null,"hasCarryForward":boolean,"isMultiMetric":boolean,"secondMetric":{"name":"string","threshold":number,"currentValue":number,"growthRate":number,"volatility":number} or null,"metricCorrelation":number or null,"paymentTiming":"string","paymentDelay":number or null,"isEscrowed":boolean,"targetIndustry":"string or null","historicalMetricData":[{"metricA":number,"metricB":number}] or null,"methodology":"Monte Carlo|probability-weighted|DCF","assumptions":{"currentMetric":number,"metricGrowthRate":number or null,"volatility":number,"discountRate":number,"riskFreeRate":number,"creditAdjustment":number or null,"comparableCompanies":["string"] or null},"initialFairValue":number or null,"currency":"string","confidenceScore":number,"ambiguities":["string"],"alternativeInterpretations":[{"clause":"string","interpretation1":"string","interpretation2":"string"}] or null,"provenance":{"volatility":{"value":number or null,"methodology":"string or null","comparableCompanies":[{"name":"string","ticker":"string or null","volatility":number or null}] or null,"deLeveringMethod":"string or null","dataDateRange":"string or null","sourceLocation":"string or null"},"discountRate":{"value":number or null,"methodology":"string or null","components":{"riskFreeRate":number or null,"equityRiskPremium":number or null,"sizePremium":number or null,"companySpecificRisk":number or null,"beta":number or null,"costOfDebt":number or null,"debtWeight":number or null,"equityWeight":number or null} or null,"sourceLocation":"string or null"},"projections":{"source":"string or null","forecastDate":"string or null","provider":"string or null","sourceLocation":"string or null"},"creditRisk":{"methodology":"string or null","acquirerRating":"string or null","sourceLocation":"string or null"},"referencedDocuments":["string"] or null,"methodologyQuote":"string or null"}}}
+
+CRITICAL INFERENCE RULES (apply when values are not explicitly stated):
+1. assumptions.currentMetric: If not stated, infer from targets. If Year 1 threshold is $30M ARR, current is likely $22-28M. For EBITDA targets, assume 8-12% growth to back-calculate.
+2. For each period, set projectedMetric to the threshold × 1.05 if not explicitly stated — management typically expects to slightly exceed targets. Do NOT leave projectedMetric as 0 or null.
+3. assumptions.volatility: If not stated, use metric-appropriate defaults: ARR/recurring revenue = 0.20, total revenue = 0.25, EBITDA = 0.40, net income = 0.50, milestone = 0.30.
+4. assumptions.metricGrowthRate: If not stated, infer from the trajectory of targets across periods. If Year 1 target = $30M and Year 2 target = $40M, implied growth = 33%.
+5. For catch-up provisions with conditional triggers (e.g., "if Year 1 is missed but cumulative ≥ X"), use catchUpType="cumulative_target" and set cumulativeTarget to the stated cumulative threshold.
+6. yearFromNow should be the number of years from now (1, 2, 3...), NOT the calendar year. If the document says "FY2027", and current year is 2026, yearFromNow = 1.
 
 VARIANT TYPE CLASSIFICATION GUIDE:
 - catchUpType: "carry_forward_payment" = unpaid amounts roll forward; "cumulative_target" = single cumulative metric evaluated; "threshold_adjustment" = missed shortfall increases next threshold; "metric_carry_forward" = prior metric added to current
@@ -1636,26 +1651,67 @@ export default function ValuProEarnout() {
       const e = extracted.earnouts[0];
       const numPeriods = e.measurementPeriods?.length || 3;
       const currentYear = new Date().getFullYear();
+
+      // ---- INTELLIGENT METRIC INFERENCE ----
+      // If current metric not stated, infer from targets assuming reasonable growth
+      let inferredCurrentMetric = e.projectedMetric || null;
+      if (!inferredCurrentMetric && e.measurementPeriods?.length > 0) {
+        // Use first period's target as anchor: assume projected ≈ target (management expects to hit it)
+        // Then back-calculate current metric assuming industry-typical growth
+        const firstTarget = e.measurementPeriods[0].target || e.threshold || 0;
+        const metricName = (e.metric || "").toLowerCase();
+        const impliedGrowth = metricName.includes("arr") || metricName.includes("revenue") ? 0.15 : metricName.includes("ebitda") ? 0.10 : 0.08;
+        const firstYear = e.measurementPeriods[0].year || 1;
+        const yearsToFirst = firstYear > 100 ? Math.max(1, firstYear - currentYear) : firstYear;
+        inferredCurrentMetric = Math.round(firstTarget / Math.pow(1 + impliedGrowth, yearsToFirst));
+      }
+      const effectiveCurrentMetric = Math.round(inferredCurrentMetric || params.currentMetric);
+
+      // Infer growth rate from targets if multiple periods available
+      let inferredGrowth = params.metricGrowthRate;
+      if (e.measurementPeriods?.length >= 2) {
+        const t1 = e.measurementPeriods[0].target;
+        const t2 = e.measurementPeriods[e.measurementPeriods.length - 1].target;
+        if (t1 && t2 && t1 > 0) {
+          const nYears = e.measurementPeriods.length;
+          inferredGrowth = Math.pow(t2 / t1, 1 / nYears) - 1;
+        }
+      }
+
+      // Infer volatility from metric type
+      const metricLower = (e.metric || "").toLowerCase();
+      let inferredVol = params.volatility;
+      if (!e.volatility) {
+        if (metricLower.includes("arr") || metricLower.includes("recurring")) inferredVol = 0.20;
+        else if (metricLower.includes("revenue")) inferredVol = 0.25;
+        else if (metricLower.includes("ebitda")) inferredVol = 0.40;
+        else if (metricLower.includes("net income") || metricLower.includes("earnings")) inferredVol = 0.50;
+      }
+
       const newPeriods = Array.from({ length: numPeriods }, (_, i) => {
         const mp = e.measurementPeriods?.[i] || {};
-        // Convert calendar year to years-from-now (e.g., 2026 → 1 if current year is 2025)
+        // Convert calendar year to years-from-now
         const rawYear = mp.year || (i + 1);
-        const yearFromNow = rawYear > 100 ? Math.max(1, rawYear - currentYear) : rawYear; // If > 100, it's a calendar year
+        const yearFromNow = rawYear > 100 ? Math.max(1, rawYear - currentYear) : rawYear;
+        // Use target as projected metric if no projection available (assume management expects to hit targets)
+        const targetVal = mp.target || e.threshold || 0;
+        const projectedFromGrowth = Math.round(effectiveCurrentMetric * Math.pow(1 + inferredGrowth, yearFromNow));
         const raw = {
           year: i + 1, yearFromNow,
-          structure: e.structure || "binary", threshold: mp.target || e.threshold || 0,
+          structure: e.structure || "binary", threshold: targetVal,
           participationRate: mp.participationRate || e.participationRate || 0,
           fixedPayment: mp.fixedPayment || e.fixedPayment || (e.maxPayout ? e.maxPayout / numPeriods : 5e6),
           cap: mp.cap || e.cap || (e.maxPayout ? e.maxPayout / numPeriods : null),
           floor: mp.floor || e.floor || 0,
-          projectedMetric: mp.projectedMetric || e.projectedMetric || Math.round(params.currentMetric * Math.pow(1.08, i + 1)),
+          projectedMetric: mp.projectedMetric || e.projectedMetric || (targetVal > 0 ? Math.round(targetVal * 1.05) : projectedFromGrowth),
           tiers: mp.tiers || null,
         };
         return normalizeExtracted(raw, raw.structure);
       });
       const ne = normalizeExtracted({ volatility: e.volatility, discountRate: e.discountRate, riskFreeRate: e.riskFreeRate }, e.structure);
-      np = { ...params, metric: e.metric || params.metric, currentMetric: Math.round(e.projectedMetric || params.currentMetric),
-        volatility: ne.volatility || params.volatility, discountRate: ne.discountRate || params.discountRate,
+      np = { ...params, metric: e.metric || params.metric, currentMetric: effectiveCurrentMetric,
+        metricGrowthRate: inferredGrowth,
+        volatility: ne.volatility || inferredVol, discountRate: ne.discountRate || params.discountRate,
         riskFreeRate: ne.riskFreeRate || params.riskFreeRate, periods: newPeriods,
         hasCatchUp: e.hasCatchUp || false, catchUpType: e.catchUpType || null, catchUpMechanism: e.catchUpMechanism || null,
         hasClawback: e.hasClawback || false, clawbackType: e.clawbackType || null, clawbackThreshold: e.clawbackThreshold || 0, clawbackRate: e.clawbackRate || 0,
@@ -1671,14 +1727,38 @@ export default function ValuProEarnout() {
     } else if (mode === "live" && extracted?.earnout) {
       const e = extracted.earnout; const a = e.assumptions || {};
       const na = normalizeExtracted({ volatility: a.volatility, discountRate: a.discountRate, riskFreeRate: a.riskFreeRate, creditAdjustment: a.creditAdjustment, metricGrowthRate: a.metricGrowthRate, currentMetric: a.currentMetric }, e.structure);
+
+      // Intelligent inference for live mode
+      const metricLowerLive = (e.metric || "").toLowerCase();
+      let inferredVolLive = na.volatility || params.volatility;
+      if (!a.volatility) {
+        if (metricLowerLive.includes("arr") || metricLowerLive.includes("recurring")) inferredVolLive = 0.20;
+        else if (metricLowerLive.includes("revenue")) inferredVolLive = 0.25;
+        else if (metricLowerLive.includes("ebitda")) inferredVolLive = 0.40;
+        else if (metricLowerLive.includes("net income")) inferredVolLive = 0.50;
+      }
+
+      // Infer current metric from first period's target if not provided
+      let liveCurrentMetric = na.currentMetric || params.currentMetric;
+      if (!a.currentMetric && e.periods?.length > 0) {
+        const firstThreshold = e.periods[0].threshold;
+        if (firstThreshold > 0) {
+          const impliedGr = metricLowerLive.includes("arr") ? 0.15 : 0.10;
+          const yfn = e.periods[0].yearFromNow || 1;
+          liveCurrentMetric = Math.round(firstThreshold / Math.pow(1 + impliedGr, yfn));
+        }
+      }
+
       const currentYearLive = new Date().getFullYear();
       const newPeriods = (e.periods || []).map((p, i) => {
         const rawYFN = p.yearFromNow || p.year || (i + 1);
         const yearFromNowLive = rawYFN > 100 ? Math.max(1, rawYFN - currentYearLive) : rawYFN;
+        // Use threshold × 1.05 as projected if no projection available
+        const projFromThreshold = p.threshold > 0 ? Math.round(p.threshold * 1.05) : 0;
         const raw = {
           year: i + 1, yearFromNow: yearFromNowLive, structure: p.structure || e.structure || "linear",
           threshold: p.threshold || 0, participationRate: p.participationRate || 0, fixedPayment: p.fixedPayment || 0,
-          cap: p.cap || null, floor: p.floor || 0, projectedMetric: p.projectedMetric || 0, tiers: p.tiers || null,
+          cap: p.cap || null, floor: p.floor || 0, projectedMetric: p.projectedMetric || projFromThreshold || 0, tiers: p.tiers || null,
           linearType: p.linearType || null, binaryType: p.binaryType || null, tieredType: p.tieredType || null,
           percentageType: p.percentageType || null, cagrType: p.cagrType || null, milestoneType: p.milestoneType || null,
           scaledTiers: p.scaledTiers || null, partialCreditFloor: p.partialCreditFloor || null,
@@ -1688,8 +1768,8 @@ export default function ValuProEarnout() {
         return normalizeExtracted(raw, raw.structure);
       });
       if (newPeriods.length === 0) newPeriods.push({ ...params.periods[0] });
-      np = { ...params, metric: e.metric || params.metric, currentMetric: na.currentMetric || params.currentMetric,
-        metricGrowthRate: na.metricGrowthRate || params.metricGrowthRate, volatility: na.volatility || params.volatility,
+      np = { ...params, metric: e.metric || params.metric, currentMetric: liveCurrentMetric,
+        metricGrowthRate: na.metricGrowthRate || params.metricGrowthRate, volatility: inferredVolLive,
         discountRate: na.discountRate || params.discountRate, riskFreeRate: na.riskFreeRate || params.riskFreeRate,
         creditAdj: na.creditAdjustment || params.creditAdj, periods: newPeriods,
         hasCatchUp: e.hasCatchUp || false, catchUpType: e.catchUpType || null, catchUpMechanism: e.catchUpMechanism || null,
@@ -1776,6 +1856,19 @@ export default function ValuProEarnout() {
 
   // Run valuation after user confirms extracted terms on review screen
   const runFromReview = () => {
+    // ---- PRE-MC VALIDATION ----
+    const warnings = [];
+    for (let i = 0; i < params.periods.length; i++) {
+      const p = params.periods[i];
+      if (p.yearFromNow > 20) warnings.push(`Period ${i+1}: yearFromNow is ${p.yearFromNow} — this looks like a calendar year, not years from now. Should be 1-5 typically.`);
+      if (p.projectedMetric > 0 && p.threshold > 0 && p.projectedMetric < p.threshold * 0.5) warnings.push(`Period ${i+1}: Projected metric ($${(p.projectedMetric/1e6).toFixed(1)}M) is less than 50% of threshold ($${(p.threshold/1e6).toFixed(1)}M). The earnout is deeply out-of-the-money.`);
+      if (p.structure === "linear" && p.participationRate === 0) warnings.push(`Period ${i+1}: Linear structure but participation rate is 0 — payoff will always be 0.`);
+      if (p.structure === "binary" && !p.fixedPayment) warnings.push(`Period ${i+1}: Binary structure but no fixed payment specified.`);
+    }
+    if (params.volatility > 0.80) warnings.push(`Volatility of ${(params.volatility*100).toFixed(0)}% is extremely high. Typical: ARR 15-25%, Revenue 20-30%, EBITDA 30-45%.`);
+    if (params.discountRate < params.riskFreeRate) warnings.push(`Discount rate (${(params.discountRate*100).toFixed(1)}%) is below risk-free rate (${(params.riskFreeRate*100).toFixed(1)}%). This implies negative risk premium.`);
+    if (warnings.length > 0) console.warn("Pre-MC validation warnings:", warnings);
+
     setView("processing"); setProgress(0);
     setStage(`Running Monte Carlo (${MC_PATHS.toLocaleString()} paths)...`); setProgress(60);
     console.log("MC params:", JSON.stringify({ periods: params.periods.map(p => ({ structure: p.structure, threshold: p.threshold, participationRate: p.participationRate, cap: p.cap, floor: p.floor, projectedMetric: p.projectedMetric })), volatility: params.volatility, discountRate: params.discountRate, riskFreeRate: params.riskFreeRate, currentMetric: params.currentMetric, multiYearCap: params.multiYearCap, hasMultiYearCap: params.hasMultiYearCap }, null, 2));
@@ -2767,27 +2860,97 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
               </div>
             </div>
 
-            {/* Per-period projections */}
+            {/* Per-period projections with structure-specific controls */}
             <div style={cardStyle}>
               <h3 style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, display: "flex", alignItems: "center", gap: 5 }}><Icon name="calendar" size={13} color={c.accent} /> Period Projections</h3>
-              {params.periods.map((p, i) => (
+              {params.periods.map((p, i) => {
+                const maxMetric = Math.max(p.projectedMetric || 0, p.threshold || 0, params.currentMetric) * 2;
+                return (
                 <div key={i} style={{ marginBottom: 10, paddingBottom: 8, borderBottom: i < params.periods.length - 1 ? `1px solid ${c.cardBorder}` : "none" }}>
                   <div style={{ fontSize: 11, fontWeight: 600, color: c.text, marginBottom: 4 }}>Year {p.yearFromNow || i + 1} — <span style={{ textTransform: "capitalize", color: c.accent }}>{p.structure}</span></div>
-                  <ParamSlider theme={theme} label={`Yr ${p.yearFromNow} Projected ${params.metric}`} value={p.projectedMetric || params.currentMetric} onChange={v => { const np = [...params.periods]; np[i] = { ...np[i], projectedMetric: v }; setParams(pr => ({ ...pr, periods: np })); }} min={5e6} max={50e6} step={500000} format="currency" />
-                  <ParamSlider theme={theme} label={`Yr ${p.yearFromNow} Threshold`} value={p.threshold || 0} onChange={v => { const np = [...params.periods]; np[i] = { ...np[i], threshold: v }; setParams(pr => ({ ...pr, periods: np })); }} min={0} max={50e6} step={500000} format="currency" />
+                  <ParamSlider theme={theme} label={`Projected ${params.metric}`} value={p.projectedMetric || params.currentMetric} onChange={v => { const np = [...params.periods]; np[i] = { ...np[i], projectedMetric: v }; setParams(pr => ({ ...pr, periods: np })); }} min={Math.max(1e6, maxMetric * 0.2)} max={maxMetric} step={500000} format="currency" />
+                  <ParamSlider theme={theme} label="Threshold" value={p.threshold || 0} onChange={v => { const np = [...params.periods]; np[i] = { ...np[i], threshold: v }; setParams(pr => ({ ...pr, periods: np })); }} min={0} max={maxMetric} step={500000} format="currency" />
+                  {(p.structure === "binary" || p.structure === "milestone") && (
+                    <ParamSlider theme={theme} label="Fixed Payment" value={p.fixedPayment || 0} onChange={v => { const np = [...params.periods]; np[i] = { ...np[i], fixedPayment: v }; setParams(pr => ({ ...pr, periods: np })); }} min={0} max={(p.fixedPayment || 5e6) * 3} step={100000} format="currency" />
+                  )}
+                  {p.structure === "linear" && (
+                    <ParamSlider theme={theme} label="Cap" value={p.cap || 0} onChange={v => { const np = [...params.periods]; np[i] = { ...np[i], cap: v }; setParams(pr => ({ ...pr, periods: np })); }} min={0} max={(p.cap || 10e6) * 3} step={100000} format="currency" />
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
 
-            {/* Global assumptions */}
+            {/* Global assumptions — with source tags */}
             <div style={cardStyle}>
               <h3 style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, display: "flex", alignItems: "center", gap: 5 }}><Icon name="sliders" size={13} color={c.accent} /> Assumptions</h3>
-              <ParamSlider theme={theme} label="Current Metric" value={params.currentMetric} onChange={v => setParams(p => ({ ...p, currentMetric: v }))} min={5e6} max={50e6} step={500000} format="currency" tooltip="Latest actual or projected metric value" />
-              <ParamSlider theme={theme} label="Metric Growth Rate" value={params.metricGrowthRate} onChange={v => setParams(p => ({ ...p, metricGrowthRate: v }))} min={-0.10} max={0.25} step={0.01} format="percent" tooltip="Expected annual growth rate of the metric" />
-              <ParamSlider theme={theme} label="Volatility" value={params.volatility} onChange={v => setParams(p => ({ ...p, volatility: v }))} min={0.10} max={0.75} step={0.01} format="percent" tooltip="Comparable company equity or metric volatility" />
-              <ParamSlider theme={theme} label="Metric Discount Rate" value={params.discountRate} onChange={v => setParams(p => ({ ...p, discountRate: v }))} min={0.05} max={0.25} step={0.005} format="percent" tooltip="Rate to discount the metric itself (e.g., WACC for EBITDA). Determines risk premium in risk-neutral simulation." />
-              <ParamSlider theme={theme} label="Risk-Free Rate" value={params.riskFreeRate} onChange={v => setParams(p => ({ ...p, riskFreeRate: v }))} min={0.01} max={0.08} step={0.001} format="percent" tooltip="US Treasury yield matching earnout duration" />
-              <ParamSlider theme={theme} label="Credit Adj." value={params.creditAdj || 0} onChange={v => setParams(p => ({ ...p, creditAdj: v }))} min={0} max={0.05} step={0.005} format="percent" tooltip="Counterparty credit risk premium (zero if escrowed)" />
+              {/* Source legend */}
+              <div className="vf r-wrap" style={{ gap: 4, marginBottom: 10 }}>
+                {[{ l: "Extracted", bg: "rgba(5,150,105,0.08)", co: c.success }, { l: "Inferred", bg: "rgba(37,99,235,0.08)", co: c.accent }, { l: "Default", bg: "rgba(217,119,6,0.08)", co: c.warning }].map(s => (
+                  <span key={s.l} style={{ fontSize: 8, padding: "1px 5px", borderRadius: 3, background: s.bg, color: s.co, fontWeight: 600 }}>{s.l}</span>
+                ))}
+              </div>
+              {(() => {
+                // Determine source of each assumption
+                const ea = mode === "live" ? extractedData?.earnout?.assumptions : extractedData?.earnouts?.[0];
+                const src = (field) => {
+                  if (backtestComparison?.isDemo) return "extracted";
+                  if (!ea) return "default";
+                  const map = { currentMetric: "currentMetric", metricGrowthRate: "metricGrowthRate", volatility: "volatility", discountRate: "discountRate", riskFreeRate: "riskFreeRate", creditAdj: "creditAdjustment" };
+                  const key = map[field] || field;
+                  if (ea[key] != null && ea[key] !== 0) return "extracted";
+                  // Check if it was inferred (not the hardcoded default)
+                  const defaults = { currentMetric: 15e6, metricGrowthRate: 0.08, volatility: 0.40, discountRate: 0.12, riskFreeRate: 0.043, creditAdj: 0.01 };
+                  if (params[field] !== defaults[field]) return "inferred";
+                  return "default";
+                };
+                const srcBadge = (field) => {
+                  const s = src(field);
+                  const cfg = { extracted: { bg: "rgba(5,150,105,0.08)", co: c.success }, inferred: { bg: "rgba(37,99,235,0.08)", co: c.accent }, default: { bg: "rgba(217,119,6,0.08)", co: c.warning } }[s];
+                  return <span style={{ fontSize: 7, padding: "0px 4px", borderRadius: 2, background: cfg.bg, color: cfg.co, fontWeight: 600, marginLeft: 4 }}>{s}</span>;
+                };
+                return <>
+                  <div style={{ marginBottom: 2 }}><span style={{ fontSize: 10, color: c.textMuted }}>Current Metric{srcBadge("currentMetric")}</span></div>
+                  <ParamSlider theme={theme} label="" value={params.currentMetric} onChange={v => setParams(p => ({ ...p, currentMetric: v }))} min={Math.max(1e6, params.currentMetric * 0.3)} max={params.currentMetric * 2} step={500000} format="currency" />
+                  <div style={{ marginBottom: 2 }}><span style={{ fontSize: 10, color: c.textMuted }}>Growth Rate{srcBadge("metricGrowthRate")}</span></div>
+                  <ParamSlider theme={theme} label="" value={params.metricGrowthRate} onChange={v => setParams(p => ({ ...p, metricGrowthRate: v }))} min={-0.10} max={0.50} step={0.01} format="percent" />
+                  <div style={{ marginBottom: 2 }}><span style={{ fontSize: 10, color: c.textMuted }}>Volatility{srcBadge("volatility")}</span></div>
+                  <ParamSlider theme={theme} label="" value={params.volatility} onChange={v => setParams(p => ({ ...p, volatility: v }))} min={0.05} max={0.75} step={0.01} format="percent" />
+                  <div style={{ marginBottom: 2 }}><span style={{ fontSize: 10, color: c.textMuted }}>Metric Discount Rate{srcBadge("discountRate")}</span></div>
+                  <ParamSlider theme={theme} label="" value={params.discountRate} onChange={v => setParams(p => ({ ...p, discountRate: v }))} min={0.05} max={0.25} step={0.005} format="percent" />
+                  <div style={{ marginBottom: 2 }}><span style={{ fontSize: 10, color: c.textMuted }}>Risk-Free Rate{srcBadge("riskFreeRate")}</span></div>
+                  <ParamSlider theme={theme} label="" value={params.riskFreeRate} onChange={v => setParams(p => ({ ...p, riskFreeRate: v }))} min={0.01} max={0.08} step={0.001} format="percent" />
+                  <div style={{ marginBottom: 2 }}><span style={{ fontSize: 10, color: c.textMuted }}>Credit Adj.{srcBadge("creditAdj")}</span></div>
+                  <ParamSlider theme={theme} label="" value={params.creditAdj || 0} onChange={v => setParams(p => ({ ...p, creditAdj: v }))} min={0} max={0.05} step={0.005} format="percent" />
+
+                  {/* Structure-specific critical sliders */}
+                  {params.periods.some(p => p.structure === "linear" && p.participationRate > 0) && (
+                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${c.cardBorder}` }}>
+                      <div style={{ fontSize: 9, fontWeight: 600, color: c.accent, marginBottom: 4 }}>Structure-Specific</div>
+                      {params.periods.map((p, i) => p.structure === "linear" ? (
+                        <div key={`pr-${i}`}>
+                          <div style={{ marginBottom: 2 }}><span style={{ fontSize: 10, color: c.textMuted }}>Yr {p.yearFromNow} Participation Rate</span></div>
+                          <ParamSlider theme={theme} label="" value={p.participationRate || 0} onChange={v => { const np = [...params.periods]; np[i] = { ...np[i], participationRate: v }; setParams(pr => ({ ...pr, periods: np })); }} min={0} max={5} step={0.1} format="number" />
+                        </div>
+                      ) : null)}
+                    </div>
+                  )}
+                  {params.periods.some(p => p.floor > 0) && (
+                    params.periods.map((p, i) => p.floor > 0 ? (
+                      <div key={`fl-${i}`}>
+                        <div style={{ marginBottom: 2 }}><span style={{ fontSize: 10, color: c.textMuted }}>Yr {p.yearFromNow} Floor / Min Guarantee</span></div>
+                        <ParamSlider theme={theme} label="" value={p.floor} onChange={v => { const np = [...params.periods]; np[i] = { ...np[i], floor: v }; setParams(pr => ({ ...pr, periods: np })); }} min={0} max={p.cap || p.fixedPayment || 10e6} step={100000} format="currency" />
+                      </div>
+                    ) : null)
+                  )}
+                  {params.hasCumulativeTarget && params.cumulativeTarget > 0 && (
+                    <div>
+                      <div style={{ marginBottom: 2 }}><span style={{ fontSize: 10, color: c.textMuted }}>Cumulative Target</span></div>
+                      <ParamSlider theme={theme} label="" value={params.cumulativeTarget} onChange={v => setParams(p => ({ ...p, cumulativeTarget: v }))} min={params.cumulativeTarget * 0.5} max={params.cumulativeTarget * 1.5} step={1e6} format="currency" />
+                    </div>
+                  )}
+                </>;
+              })()}
               <div style={{ fontSize: 10, color: c.textDim, padding: "6px 0 2px", borderTop: `1px solid ${c.cardBorder}`, marginTop: 4 }}>
                 Payoff discount: {fmtPct(params.payoffDiscountRate != null ? params.payoffDiscountRate : (params.riskFreeRate + (params.isEscrowed ? 0 : (params.creditAdj || 0))))} (Rf + Credit)
                 <br />Risk-neutral drift: {fmtPct(params.metricGrowthRate - (params.discountRate - params.riskFreeRate))} (Growth − Risk Premium)
