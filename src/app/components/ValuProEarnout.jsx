@@ -2532,6 +2532,59 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
                     </button>
                   ))}
                 </div>
+
+                {/* Variant type selectors — only shown when parent feature is active */}
+                {(params.hasCatchUp || params.hasClawback || params.hasAcceleration || params.hasCumulativeTarget) && (
+                  <div style={{ marginTop: 8, padding: "8px 10px", background: tc ? "#1a2540" : "#fafbfc", border: `1px solid ${c.cardBorder}`, borderRadius: 6, fontSize: 10 }}>
+                    <div style={{ fontSize: 9, fontWeight: 600, color: c.accent, marginBottom: 6 }}>Variant Configuration (auto-detected from document)</div>
+                    {params.hasCatchUp && (
+                      <div className="vf" style={{ alignItems: "center", gap: 6, marginBottom: 4 }}>
+                        <span style={{ width: 80, color: c.textMuted }}>Catch-Up:</span>
+                        <select value={params.catchUpType || "carry_forward_payment"} onChange={e => setParams(p => ({ ...p, catchUpType: e.target.value }))}
+                          style={{ flex: 1, padding: "2px 4px", fontSize: 10, border: `1px solid ${c.cardBorder}`, borderRadius: 3, background: c.inputBg, color: c.text }}>
+                          <option value="carry_forward_payment">Carry Forward Payment</option><option value="cumulative_target">Cumulative Target</option>
+                          <option value="threshold_adjustment">Threshold Adjustment</option><option value="metric_carry_forward">Metric Carry Forward</option>
+                        </select>
+                        <select value={params.catchUpMechanism || "adjust_metric"} onChange={e => setParams(p => ({ ...p, catchUpMechanism: e.target.value }))}
+                          style={{ padding: "2px 4px", fontSize: 10, border: `1px solid ${c.cardBorder}`, borderRadius: 3, background: c.inputBg, color: c.text }}>
+                          <option value="adjust_metric">Adjust Metric</option><option value="adjust_payoff">Adjust Payoff</option>
+                        </select>
+                      </div>
+                    )}
+                    {params.hasClawback && (
+                      <div className="vf" style={{ alignItems: "center", gap: 6, marginBottom: 4 }}>
+                        <span style={{ width: 80, color: c.textMuted }}>Clawback:</span>
+                        <select value={params.clawbackType || "terminal_cumulative"} onChange={e => setParams(p => ({ ...p, clawbackType: e.target.value }))}
+                          style={{ flex: 1, padding: "2px 4px", fontSize: 10, border: `1px solid ${c.cardBorder}`, borderRadius: 3, background: c.inputBg, color: c.text }}>
+                          <option value="terminal_cumulative">Terminal Cumulative</option><option value="per_period">Per Period</option>
+                          <option value="cumulative_shortfall">Cumulative Shortfall</option><option value="lookback">Lookback</option>
+                        </select>
+                      </div>
+                    )}
+                    {params.hasAcceleration && (
+                      <div className="vf" style={{ alignItems: "center", gap: 6, marginBottom: 4 }}>
+                        <span style={{ width: 80, color: c.textMuted }}>Acceleration:</span>
+                        <select value={params.accelerationType || "pay_maximum"} onChange={e => setParams(p => ({ ...p, accelerationType: e.target.value }))}
+                          style={{ flex: 1, padding: "2px 4px", fontSize: 10, border: `1px solid ${c.cardBorder}`, borderRadius: 3, background: c.inputBg, color: c.text }}>
+                          <option value="pay_maximum">Pay Maximum</option><option value="pay_expected">Pay Expected</option><option value="pay_pro_rata">Pay Pro Rata</option>
+                        </select>
+                        <select value={params.accelerationHazardShape || "flat"} onChange={e => setParams(p => ({ ...p, accelerationHazardShape: e.target.value }))}
+                          style={{ padding: "2px 4px", fontSize: 10, border: `1px solid ${c.cardBorder}`, borderRadius: 3, background: c.inputBg, color: c.text }}>
+                          <option value="flat">Flat</option><option value="decreasing">Decreasing</option><option value="increasing">Increasing</option>
+                        </select>
+                      </div>
+                    )}
+                    {params.hasCumulativeTarget && (
+                      <div className="vf" style={{ alignItems: "center", gap: 6, marginBottom: 4 }}>
+                        <span style={{ width: 80, color: c.textMuted }}>Cumulative:</span>
+                        <select value={params.cumulativeTargetType || "all_or_nothing"} onChange={e => setParams(p => ({ ...p, cumulativeTargetType: e.target.value }))}
+                          style={{ flex: 1, padding: "2px 4px", fontSize: 10, border: `1px solid ${c.cardBorder}`, borderRadius: 3, background: c.inputBg, color: c.text }}>
+                          <option value="all_or_nothing">All or Nothing</option><option value="pro_rata">Pro Rata</option><option value="excess_only">Excess Only</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Assumptions */}
@@ -2582,6 +2635,19 @@ input[type=range]{-webkit-appearance:none;background:${c.cardBorder};border-radi
                       <EditField label="Cap ($)" value={p.cap || 0} onChange={v => updatePeriod(i, "cap", v)} step={100000} fieldKey="cap" />
                       {(p.floor > 0 || p.structure === "linear") && (
                         <EditField label="Floor / Min Guarantee ($)" value={p.floor || 0} onChange={v => updatePeriod(i, "floor", v)} step={100000} fieldKey="floor" tooltip="Minimum payment regardless of metric performance (e.g., minimum guarantee)" />
+                      )}
+                      {/* Structure-specific variant fields */}
+                      {p.structure === "milestone" && (
+                        <EditField label="Milestone Probability" value={p.milestoneProbability || 0.5} onChange={v => updatePeriod(i, "milestoneProbability", v)} step={0.05} fieldKey="milestoneProbability" tooltip="Probability of milestone achievement (0 to 1)" />
+                      )}
+                      {p.structure === "cagr" && <>
+                        <EditField label="CAGR Target" value={p.cagrTarget || 0} onChange={v => updatePeriod(i, "cagrTarget", v)} step={0.01} format="percent" fieldKey="cagrTarget" tooltip="Required compound annual growth rate" />
+                        <EditField label="CAGR Base Value ($)" value={p.baseValue || 0} onChange={v => updatePeriod(i, "baseValue", v)} step={100000} fieldKey="baseValue" tooltip="Starting metric value for CAGR calculation" />
+                      </>}
+                      {p.structure === "tiered" && p.tieredType === "retroactive" && (
+                        <div style={{ gridColumn: "1 / -1", fontSize: 10, padding: "3px 6px", background: "rgba(37,99,235,0.04)", borderRadius: 4, color: c.accent }}>
+                          Retroactive tiered: highest bracket rate applies to all units
+                        </div>
                       )}
                     </div>
                   </div>
