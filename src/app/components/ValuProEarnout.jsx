@@ -1635,10 +1635,14 @@ export default function ValuProEarnout() {
     if (mode === "backtest" && extracted?.earnouts?.length > 0) {
       const e = extracted.earnouts[0];
       const numPeriods = e.measurementPeriods?.length || 3;
+      const currentYear = new Date().getFullYear();
       const newPeriods = Array.from({ length: numPeriods }, (_, i) => {
         const mp = e.measurementPeriods?.[i] || {};
+        // Convert calendar year to years-from-now (e.g., 2026 → 1 if current year is 2025)
+        const rawYear = mp.year || (i + 1);
+        const yearFromNow = rawYear > 100 ? Math.max(1, rawYear - currentYear) : rawYear; // If > 100, it's a calendar year
         const raw = {
-          year: i + 1, yearFromNow: mp.year || (i + 1),
+          year: i + 1, yearFromNow,
           structure: e.structure || "binary", threshold: mp.target || e.threshold || 0,
           participationRate: mp.participationRate || e.participationRate || 0,
           fixedPayment: mp.fixedPayment || e.fixedPayment || (e.maxPayout ? e.maxPayout / numPeriods : 5e6),
@@ -1667,9 +1671,12 @@ export default function ValuProEarnout() {
     } else if (mode === "live" && extracted?.earnout) {
       const e = extracted.earnout; const a = e.assumptions || {};
       const na = normalizeExtracted({ volatility: a.volatility, discountRate: a.discountRate, riskFreeRate: a.riskFreeRate, creditAdjustment: a.creditAdjustment, metricGrowthRate: a.metricGrowthRate, currentMetric: a.currentMetric }, e.structure);
+      const currentYearLive = new Date().getFullYear();
       const newPeriods = (e.periods || []).map((p, i) => {
+        const rawYFN = p.yearFromNow || p.year || (i + 1);
+        const yearFromNowLive = rawYFN > 100 ? Math.max(1, rawYFN - currentYearLive) : rawYFN;
         const raw = {
-          year: i + 1, yearFromNow: p.yearFromNow || (i + 1), structure: p.structure || e.structure || "linear",
+          year: i + 1, yearFromNow: yearFromNowLive, structure: p.structure || e.structure || "linear",
           threshold: p.threshold || 0, participationRate: p.participationRate || 0, fixedPayment: p.fixedPayment || 0,
           cap: p.cap || null, floor: p.floor || 0, projectedMetric: p.projectedMetric || 0, tiers: p.tiers || null,
           linearType: p.linearType || null, binaryType: p.binaryType || null, tieredType: p.tieredType || null,
