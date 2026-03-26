@@ -1636,12 +1636,16 @@ export default function ValuProEarnout() {
       const e = extracted.earnouts[0];
       const numPeriods = e.measurementPeriods?.length || 3;
       const newPeriods = Array.from({ length: numPeriods }, (_, i) => {
+        const mp = e.measurementPeriods?.[i] || {};
         const raw = {
-          year: i + 1, yearFromNow: e.measurementPeriods?.[i]?.year || (i + 1),
-          structure: e.structure || "binary", threshold: e.threshold || 0,
-          participationRate: e.participationRate || 0, fixedPayment: e.fixedPayment || (e.maxPayout ? e.maxPayout / numPeriods : 5e6),
-          cap: e.cap || (e.maxPayout ? e.maxPayout / numPeriods : null), floor: e.floor || 0,
-          projectedMetric: e.projectedMetric || Math.round(params.currentMetric * Math.pow(1.08, i + 1)), tiers: null,
+          year: i + 1, yearFromNow: mp.year || (i + 1),
+          structure: e.structure || "binary", threshold: mp.target || e.threshold || 0,
+          participationRate: mp.participationRate || e.participationRate || 0,
+          fixedPayment: mp.fixedPayment || e.fixedPayment || (e.maxPayout ? e.maxPayout / numPeriods : 5e6),
+          cap: mp.cap || e.cap || (e.maxPayout ? e.maxPayout / numPeriods : null),
+          floor: mp.floor || e.floor || 0,
+          projectedMetric: mp.projectedMetric || e.projectedMetric || Math.round(params.currentMetric * Math.pow(1.08, i + 1)),
+          tiers: mp.tiers || null,
         };
         return normalizeExtracted(raw, raw.structure);
       });
@@ -1768,6 +1772,8 @@ export default function ValuProEarnout() {
     setView("processing"); setProgress(0);
     setStage(`Running Monte Carlo (${MC_PATHS.toLocaleString()} paths)...`); setProgress(60);
     console.log("MC params:", JSON.stringify({ periods: params.periods.map(p => ({ structure: p.structure, threshold: p.threshold, participationRate: p.participationRate, cap: p.cap, floor: p.floor, projectedMetric: p.projectedMetric })), volatility: params.volatility, discountRate: params.discountRate, riskFreeRate: params.riskFreeRate, currentMetric: params.currentMetric, multiYearCap: params.multiYearCap, hasMultiYearCap: params.hasMultiYearCap }, null, 2));
+    console.log("Full period[0]:", JSON.stringify(params.periods[0]));
+    console.log("Extracted data:", JSON.stringify(extractedData?.earnouts?.[0] || extractedData?.earnout || "none"));
     setTimeout(() => {
       const res = runMultiPeriodMC(params);
       setResults(res);
